@@ -1,0 +1,75 @@
+/* =========================================================
+   TEMA OSCURO — Dashboard académico premium
+   Paleta: petróleo profundo · dorado · verde sobrio
+   ========================================================= */
+
+/* ---------- Google Fonts hint ---------- */
+@import url('https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+/* ---------- Forzar fondo oscuro en toda la app ---------- */
+.stApp, .stApp > div {
+  background-color: #081C24 !important;
+}
+
+/* ---------- Sidebar oscuro ---------- */
+section[data-testid="stSidebar"] {
+  background-color: #0D2733 !important;
+  border-right: 1px solid #1A3D4E !important;
+}
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] .stMarkdown p {
+  color: #8CBECB !important;
+}
+
+/* ---------- Inputs y selectbox en oscuro ---------- */
+div[data-testid="stFileUploader"],
+div[data-testid="stMultiSelect"],
+div[data-baseweb="select"] {
+  background-color: #0D2733 !important;
+}
+
+/* ---------- Texto Streamlit nativo ---------- */
+.stMarkdown p, .stCaption, caption {
+  color: #8CBECB;
+}
+
+/* ---------- Plotly modebar ---------- */
+.js-plotly-plot .plotly .modebar {
+  opacity: 0.35 !important;
+}
+.js-plotly-plot .plotly .modebar:hover {
+  opacity: 1 !important;
+}
+
+/* ---------- Divisor de secciones ---------- */
+.sec-divider {
+  height: 1px;
+  background: #1A3D4E;
+  margin: 1.6rem 0;
+}
+
+/* ---------- st.dataframe / st.table override ---------- */
+div[data-testid="stDataFrameGlideDataEditor"] {
+  border: 1px solid #1A3D4E !important;
+  border-radius: 12px !important;
+}
+
+/* ---------- Tabs ---------- */
+button[role="tab"] {
+  color: #8CBECB !important;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif !important;
+}
+button[role="tab"][aria-selected="true"] {
+  color: #E0EEF2 !important;
+  border-bottom-color: #3AAFC4 !important;
+}
+
+/* ---------- Alertas / info boxes ---------- */
+div[data-testid="stAlert"] {
+  background-color: #0D2733 !important;
+  border-color: #1A3D4E !important;
+  color: #8CBECB !important;
+}
+
+/* ---------- Spinner ---------- */
+.stSpinner > div { border-top-color: #3AAFC4 !important; }

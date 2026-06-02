@@ -1,0 +1,23 @@
+# Entorno virtual
+.venv/
+venv/
+# Python
+__pycache__/
+# Streamlit
+.streamlit/secrets.toml
+# Datos sensibles
+data/local_private/
+*.xlsx
+*.xlsb
+*.xls
+*.csv
+# Excepciones permitidas para muestras anonimizadas
+!data/sample/
+!data/sample/*.xlsx
+!data/sample/*.csv
+# Sistema
+.DS_Store
+Thumbs.db
+# IDE
+.vscode/
+.idea/
