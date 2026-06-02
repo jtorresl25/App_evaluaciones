@@ -214,13 +214,146 @@ def build_subsets(df: pd.DataFrame) -> dict:
     }
 
 
+# ── Helpers para BASE_DETALLE_PDF ────────────────────────────────────────────
+
+def _to_bool(series: pd.Series) -> pd.Series:
+    """
+    Convierte a booleano robusto desde: True/False, 'TRUE'/'FALSE',
+    'Verdadero'/'Falso', 'SÍ'/'NO', 1/0, y sus variantes.
+    Valores nulos → False.
+    """
+    if series.dtype == bool:
+        return series
+
+    def _cvt(val):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return False
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        v = str(val).strip().upper()
+        return v in ("TRUE", "VERDADERO", "SI", "SÍ", "YES", "1", "V", "CIERTO")
+
+    return series.apply(_cvt)
+
+
+def _normalize_pdf_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remapea el esquema antiguo de BASE_DETALLE_PDF al nuevo.
+    Crea columnas derivadas que no existían en el esquema anterior.
+    Solo actúa si se detectan columnas del esquema antiguo.
+    """
+    # Renombrar columnas antiguas → nuevas (solo si la nueva no existe ya)
+    _REMAP = {
+        "id_detalle":    "id_pdf",
+        "periodo":       "periodo_label",
+        "codigo_curso":  "curso_codigo_base",
+        "nombre_curso":  "curso_nombre_normalizado",
+        "nivel_analisis":"ambito",
+        "puntaje":       "valor_central",
+        "serie":         "nivel_comparacion",
+        "confianza":     "confianza_extraccion",
+    }
+    for old, new in _REMAP.items():
+        if old in df.columns and new not in df.columns:
+            df = df.rename(columns={old: new})
+
+    # Derivar periodo_id si falta
+    if "periodo_label" in df.columns and "periodo_id" not in df.columns:
+        def _pid(lbl):
+            parts = str(lbl).split("-")
+            if len(parts) == 2:
+                try:
+                    y = int(parts[0])
+                    s = parts[1].strip().upper()
+                    sm = 10 if s == "1" else (20 if s == "2" else 0)
+                    return y * 100 + sm
+                except ValueError:
+                    pass
+            return None
+        df["periodo_id"] = df["periodo_label"].apply(_pid)
+
+    # Derivar anio / semestre si faltan
+    if "periodo_label" in df.columns:
+        if "anio" not in df.columns:
+            df["anio"] = df["periodo_label"].apply(
+                lambda x: int(str(x).split("-")[0]) if "-" in str(x) else None
+            )
+        if "semestre" not in df.columns:
+            df["semestre"] = df["periodo_label"].apply(
+                lambda x: str(x).split("-")[1].strip() if "-" in str(x) else None
+            )
+
+    # Derivar es_resumen_semestre_ponderado
+    if "es_resumen_semestre_ponderado" not in df.columns:
+        if "aspecto" in df.columns and "nivel_comparacion" in df.columns:
+            _niveles = {"Profesor", "Facultad", "Universidad"}
+            mask = (
+                df["aspecto"].astype(str).str.lower().str.strip() == "puntaje global"
+            ) & (
+                df["nivel_comparacion"].isin(_niveles)
+            )
+            if "curso_codigo_base" in df.columns:
+                mask &= df["curso_codigo_base"].isna()
+            df["es_resumen_semestre_ponderado"] = mask
+        else:
+            df["es_resumen_semestre_ponderado"] = False
+
+    # Derivar tiene_puntaje_calculado
+    if "tiene_puntaje_calculado" not in df.columns:
+        if "valor_central" in df.columns:
+            nc_mask = pd.Series(False, index=df.index)
+            if "estado_calculo" in df.columns:
+                nc_mask = df["estado_calculo"].astype(str).str.upper() == "NC"
+            df["tiene_puntaje_calculado"] = df["valor_central"].notna() & ~nc_mask
+        else:
+            df["tiene_puntaje_calculado"] = False
+
+    # estado_calculo: si no existe, derivar de estado_revision (esquema antiguo)
+    if "estado_calculo" not in df.columns and "estado_revision" in df.columns:
+        df["estado_calculo"] = df["estado_revision"]
+
+    return df
+
+
 def clean_pdf(df: pd.DataFrame) -> pd.DataFrame:
-    """Limpieza mínima para BASE_DETALLE_PDF."""
+    """
+    Limpieza completa de BASE_DETALLE_PDF.
+    Acepta tanto el nuevo esquema (v2) como el antiguo.
+    """
     if df is None:
         return None
     df = df.copy()
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
-    df = _to_numeric(df, ["puntaje", "limite_inferior", "limite_superior"])
-    if "periodo" in df.columns:
-        df["periodo"] = df["periodo"].astype(str).str.strip()
+
+    # Detectar y normalizar esquema antiguo
+    _old_markers = {"id_detalle", "puntaje", "estado_revision"}
+    _new_markers = {"valor_central", "nivel_comparacion", "es_resumen_semestre_ponderado"}
+    if (_old_markers & set(df.columns)) and not (_new_markers & set(df.columns)):
+        df = _normalize_pdf_old_to_new(df)
+
+    # Columnas numéricas
+    for col in ("valor_central", "inscritos", "evaluaciones",
+                "limite_inferior", "limite_superior"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Columnas booleanas — manejo robusto de TRUE/FALSE/1/0/texto
+    for col in ("es_resumen_semestre_ponderado",
+                "tiene_puntaje_calculado",
+                "requiere_revision"):
+        if col in df.columns:
+            df[col] = _to_bool(df[col])
+
+    # periodo_label asegurado como string limpio
+    if "periodo_label" in df.columns:
+        df["periodo_label"] = df["periodo_label"].astype(str).str.strip()
+    elif "periodo" in df.columns:
+        df["periodo_label"] = df["periodo"].astype(str).str.strip()
+
+    # periodo_order para ordenación cronológica
+    if "periodo_label" in df.columns and "periodo_order" not in df.columns:
+        df = _build_periodo_cols(df)
+
     return df

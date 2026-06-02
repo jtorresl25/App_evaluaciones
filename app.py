@@ -16,7 +16,6 @@ if _CSS_PATH.exists():
     css = _CSS_PATH.read_text(encoding="utf-8")
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
-# Google Fonts (Spectral + IBM Plex Sans)
 st.markdown(
     '<link rel="preconnect" href="https://fonts.googleapis.com">'
     '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
@@ -29,7 +28,10 @@ st.markdown(
 from app.utils.data_loader import load_excel
 from app.utils.data_cleaning import clean, build_subsets, clean_pdf
 from app.utils.metrics import compute
+from app.utils.pdf_analysis import compute_pdf_metrics
 from app.components import sections
+
+_DEFAULT_TEACHER = "Juan Pablo Ramos Bonilla"
 
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
@@ -45,22 +47,19 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "Cargar archivo Excel",
         type=["xlsx", "xls"],
-        help="Sube el archivo Evaluaciones_Docentes_VF_base_streamlit.xlsx",
+        help="Sube el archivo de evaluaciones docentes (.xlsx)",
         label_visibility="visible",
     )
 
     st.markdown("---")
 
-    # Filtros (se activan solo con datos)
-    filtro_modelo = None
-    filtro_cursos = []
+    filtro_modelo   = None
+    filtro_cursos   = []
     filtro_periodos = []
-    mostrar_pdf = False
 
     if uploaded_file is not None:
         st.markdown("**Filtros**")
 
-    # Placeholder para filtros dinámicos (llenados más abajo tras cargar datos)
     sidebar_filtros_placeholder = st.empty()
 
     st.markdown("---")
@@ -74,7 +73,6 @@ with st.sidebar:
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 if uploaded_file is None:
-    # ── Estado inicial — sin archivo ──────────────────────────────────────────
     st.markdown(
         '<span style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;'
         'color:#3AAFC4;font-weight:500;margin-top:2rem;display:block">Herramienta de análisis</span>',
@@ -103,15 +101,31 @@ else:
             st.stop()
 
         df_general_raw = raw["df_general"]
-        df_pdf_raw = raw["df_pdf"]
+        df_pdf_raw     = raw["df_pdf"]
 
         df_clean = clean(df_general_raw)
-        subsets = build_subsets(df_clean)
-        df_pdf = clean_pdf(df_pdf_raw)
-        metrics = compute(subsets, df_clean)
+        subsets  = build_subsets(df_clean)
+        df_pdf   = clean_pdf(df_pdf_raw)
+        metrics  = compute(subsets, df_clean)
 
-    # ── Filtros dinámicos en sidebar ──────────────────────────────────────────
+        # Métricas PDF (no alimentan KPIs principales)
+        pdf_metrics = compute_pdf_metrics(df_pdf) if df_pdf is not None else {}
+
+        # Nombre del docente: detectado en el archivo, con fallback al default
+        teacher_name_detected = raw.get("teacher_name") or _DEFAULT_TEACHER
+
+    # ── Filtros dinámicos + nombre del docente en sidebar ─────────────────────
     with sidebar_filtros_placeholder.container():
+        # Nombre editable
+        nombre_docente = st.text_input(
+            "Nombre del docente",
+            value=teacher_name_detected,
+            key="nombre_docente",
+            help="Puedes editar temporalmente el nombre que aparece en el dashboard.",
+        )
+
+        st.markdown("**Filtros de datos**")
+
         modelos_disp = sorted(
             df_clean["modelo_evaluacion"].dropna().unique().tolist()
         ) if "modelo_evaluacion" in df_clean.columns else []
@@ -124,7 +138,8 @@ else:
         )
 
         cursos_disp = sorted(
-            df_clean[df_clean["es_valido_desempeno"]]["nombre_curso"].dropna().unique().tolist()
+            df_clean[df_clean["es_valido_desempeno"]]["nombre_curso"]
+            .dropna().unique().tolist()
         ) if "nombre_curso" in df_clean.columns else []
 
         filtro_cursos = st.multiselect(
@@ -147,22 +162,15 @@ else:
             placeholder="Todos los periodos",
         )
 
-        if df_pdf is not None:
-            mostrar_pdf = st.checkbox("Mostrar detalle PDF", value=False, key="mostrar_pdf")
-
     # ── Aplicar filtros ───────────────────────────────────────────────────────
     df_filtered = df_clean.copy()
-
     if filtro_modelo:
         df_filtered = df_filtered[df_filtered["modelo_evaluacion"].isin(filtro_modelo)]
-
     if filtro_cursos:
         df_filtered = df_filtered[df_filtered["nombre_curso"].isin(filtro_cursos)]
-
     if filtro_periodos:
         df_filtered = df_filtered[df_filtered["periodo_label"].isin(filtro_periodos)]
 
-    # Recalcular subsets y métricas con datos filtrados
     subsets_f = build_subsets(df_filtered)
     metrics_f = compute(subsets_f, df_filtered)
 
@@ -174,17 +182,17 @@ else:
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<h1 style='font-family:Spectral,Georgia,serif;color:#E0EEF2;"
-        "font-size:clamp(22px,3.5vw,40px);margin:4px 0 0;line-height:1.1'>"
-        "Evaluaciones docentes históricas</h1>",
+        f"<h1 style='font-family:Spectral,Georgia,serif;color:#E0EEF2;"
+        f"font-size:clamp(22px,3.5vw,40px);margin:4px 0 0;line-height:1.1'>"
+        f"Evaluaciones docentes — {nombre_docente}</h1>",
         unsafe_allow_html=True,
     )
-    # Detectar rango de años desde los datos para hacer el subtítulo dinámico
     anio_min = anio_max = ""
     if "anio" in df_clean.columns:
-        anos = df_clean["anio"].dropna().astype(int)
-        if not anos.empty:
-            anio_min, anio_max = int(anos.min()), int(anos.max())
+        anos = df_clean["anio"].dropna()
+        anos_num = pd.to_numeric(anos, errors="coerce").dropna().astype(int)
+        if not anos_num.empty:
+            anio_min, anio_max = int(anos_num.min()), int(anos_num.max())
     rango = f"{anio_min}–{anio_max}" if anio_min and anio_min != anio_max else str(anio_min)
     st.markdown(
         f"<p style='font-size:15px;color:#8CBECB;margin-bottom:1.2rem'>"
@@ -192,48 +200,50 @@ else:
         unsafe_allow_html=True,
     )
 
-    # ── 1. Hero / Conclusión ejecutiva ────────────────────────────────────────
-    sections.render_hero(metrics_f)
+    # ── Navegación por tabs ───────────────────────────────────────────────────
+    tab_labels = ["📊 Resumen ejecutivo"]
+    if df_pdf is not None:
+        tab_labels.append("📊 Desempeño Detallado")
 
-    # ── 2. KPIs ───────────────────────────────────────────────────────────────
-    st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-    sections.render_kpis(metrics_f)
+    tabs = st.tabs(tab_labels)
 
-    # ── 3. Modelo actual ──────────────────────────────────────────────────────
-    st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-    df_actual_f = subsets_f.get("df_modelo_actual", pd.DataFrame())
-    sections.render_modelo_actual_section(df_actual_f, metrics_f)
+    # ── Tab 1: Resumen ejecutivo ──────────────────────────────────────────────
+    with tabs[0]:
+        sections.render_hero(metrics_f)
 
-    # ── 4. Contexto histórico — modelo anterior ───────────────────────────────
-    df_anterior_f = subsets_f.get("df_modelo_anterior", pd.DataFrame())
-    if not df_anterior_f.empty:
         st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-        sections.render_modelo_anterior_section(df_anterior_f, metrics_f)
+        sections.render_kpis(metrics_f)
 
-    # ── 5. Comparación relativa ───────────────────────────────────────────────
-    st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-    sections.render_comparacion_relativa_section(metrics_f)
-
-    # ── 6. Cursos individuales ────────────────────────────────────────────────
-    st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-    df_cursos_f = subsets_f.get("df_cursos_individuales", pd.DataFrame())
-    sections.render_cursos_section(df_cursos_f, metrics_f)
-
-    # ── 7. Detalle PDF (solo si existe y el checkbox está activo) ─────────────
-    if df_pdf is not None and mostrar_pdf:
         st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-        sections.render_pdf_detail_section(df_pdf)
+        df_actual_f = subsets_f.get("df_modelo_actual", pd.DataFrame())
+        sections.render_modelo_actual_section(df_actual_f, metrics_f)
 
-    # ── 8. Metodología ────────────────────────────────────────────────────────
-    st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-    sections.render_metodologia_section()
+        df_anterior_f = subsets_f.get("df_modelo_anterior", pd.DataFrame())
+        if not df_anterior_f.empty:
+            st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
+            sections.render_modelo_anterior_section(df_anterior_f, metrics_f)
 
-    # ── Footer ────────────────────────────────────────────────────────────────
-    st.markdown(
-        '<div style="margin-top:3rem;padding:22px 0;border-top:1px solid #1A3D4E;'
-        'font-size:12px;color:#537F8A;text-align:center;font-family:IBM Plex Sans,system-ui,sans-serif">'
-        'Dashboard generado desde el archivo Excel cargado · '
-        'Ningún dato es almacenado por la aplicación.'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
+        sections.render_comparacion_relativa_section(metrics_f)
+
+        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
+        df_cursos_f = subsets_f.get("df_cursos_individuales", pd.DataFrame())
+        sections.render_cursos_section(df_cursos_f, metrics_f)
+
+        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
+        sections.render_metodologia_section()
+
+        st.markdown(
+            '<div style="margin-top:3rem;padding:22px 0;border-top:1px solid #1A3D4E;'
+            'font-size:12px;color:#537F8A;text-align:center;'
+            'font-family:IBM Plex Sans,system-ui,sans-serif">'
+            'Dashboard generado desde el archivo Excel cargado · '
+            'Ningún dato es almacenado por la aplicación.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Tab 2: Detalle PDF ────────────────────────────────────────────────────
+    if df_pdf is not None and len(tabs) > 1:
+        with tabs[1]:
+            sections.render_pdf_detail_section(df_pdf, pdf_metrics)
