@@ -819,17 +819,30 @@ def plot_tendencia_curso(
 # ── 12. Heatmap general cursos × dimensiones ─────────────────────────────────
 def plot_heatmap_cursos(df: pd.DataFrame) -> go.Figure:
     """
-    Heatmap: filas = cursos, columnas = aspectos,
-    valores = promedio valor_central para nivel_comparacion == 'Profesor curso'.
-    Excluye registros de resumen semestral y cursos sin puntaje.
+    Heatmap auxiliar: filas = cursos, columnas = aspectos.
+    Fuente: BASE_DETALLE · nivel_comparacion == 'Profesor curso'.
+    Excluye NC, sin puntaje y resúmenes semestrales.
+    No mezcla escalas ni modelos — solo datos auxiliares de BASE_DETALLE.
     """
     if df is None or df.empty:
-        return _empty_fig("Sin datos para heatmap")
+        return _empty_fig("Sin datos para el mapa de desempeño")
 
-    req = ["curso_nombre_normalizado", "aspecto", "valor_central",
-           "nivel_comparacion", "tiene_puntaje_calculado"]
-    if not all(c in df.columns for c in req):
-        return _empty_fig("Faltan columnas para construir el mapa")
+    # Verificar columnas mínimas
+    req_min = ["aspecto", "valor_central", "nivel_comparacion", "tiene_puntaje_calculado"]
+    if not all(c in df.columns for c in req_min):
+        return _empty_fig("Faltan columnas necesarias para el mapa de desempeño")
+
+    # Columna de nombre del curso: intentar varias opciones
+    nombre_col_h = None
+    for _c in ("curso_nombre_normalizado", "curso_nombre_original", "nombre_curso"):
+        if _c in df.columns:
+            nombre_col_h = _c
+            break
+    # Fallback: código de curso
+    if nombre_col_h is None and "curso_codigo_base" in df.columns:
+        nombre_col_h = "curso_codigo_base"
+    if nombre_col_h is None:
+        return _empty_fig("No se encontró columna de nombre de curso para el mapa")
 
     df_h = df[
         (df["nivel_comparacion"] == "Profesor curso") &
@@ -841,63 +854,112 @@ def plot_heatmap_cursos(df: pd.DataFrame) -> go.Figure:
         df_h = df_h[df_h["es_resumen_semestre_ponderado"] != True]
 
     if df_h.empty:
-        return _empty_fig("Sin datos de nivel 'Profesor curso' para heatmap")
+        return _empty_fig("Sin datos de nivel 'Profesor curso' para el mapa")
 
     pivot = df_h.pivot_table(
-        index="curso_nombre_normalizado",
+        index=nombre_col_h,
         columns="aspecto",
         values="valor_central",
         aggfunc="mean",
     )
 
-    # Ordenar columnas
     cols_ordered = _ordered_aspects(pivot.columns.tolist())
     pivot = pivot[[c for c in cols_ordered if c in pivot.columns]]
     short_cols = [_short(c) for c in pivot.columns]
 
-    # Truncar nombres de cursos en el eje Y
-    def _trunc(s, n=36):
-        s = str(s)
+    # Truncar nombres de cursos — máximo 44 chars, capitalizados correctamente
+    def _trunc_nombre(s, n=44):
+        s = str(s).strip()
+        s = s.capitalize() if s.isupper() else s  # evitar TODO MAYÚSCULAS
         return s if len(s) <= n else s[:n - 1] + "…"
 
-    row_labels = [_trunc(r) for r in pivot.index]
+    row_labels = [_trunc_nombre(r) for r in pivot.index]
 
-    # Colorscale teal oscuro → brillante
+    # ── Escala de color dinámica (percentiles) ────────────────────────────────
+    # Usa p5–p98 para que un valor extremo no aplaste el contraste del resto.
+    # Si hay pocos datos (<5 valores únicos) usa min/max.
+    vals_flat = df_h["valor_central"].dropna()
+    if len(vals_flat) >= 5:
+        zmin = float(vals_flat.quantile(0.05))
+        zmax = float(vals_flat.quantile(0.98))
+    else:
+        zmin = float(vals_flat.min())
+        zmax = float(vals_flat.max())
+    # Asegurar que zmin < zmax aunque todos los valores sean iguales
+    if zmax <= zmin:
+        zmax = zmin + 0.5
+
+    # ── Paleta Opción A: Azul/cyan premium ───────────────────────────────────
+    # Bajo relativo → dark teal (no alarma, funde con fondo oscuro)
+    # Alto relativo → cyan brillante (destaca con elegancia)
+    # Sin rojo, sin blanco puro. Transmite "más fuerte / menos fuerte",
+    # nunca "bueno / malo".
     colorscale = [
-        [0.0,  "#0A2230"],
-        [0.3,  "#1A3D4E"],
-        [0.6,  "#2A8CA0"],
-        [0.8,  "#4EC8E0"],
-        [1.0,  "#C8F0F7"],
+        [0.00, "#0D2733"],   # bajo relativo — muy oscuro, neutro
+        [0.30, "#1B5E6E"],   # medio-bajo
+        [0.60, "#2D9CB5"],   # medio
+        [0.80, "#4DCCDE"],   # alto
+        [1.00, "#9AE8F5"],   # muy alto — cyan claro, nunca blanco
     ]
+
+    # ── Texto con contraste seguro ────────────────────────────────────────────
+    # Celdas claras (rango alto → #9AE8F5) reciben texto oscuro para contraste.
+    # Calcula umbral como punto medio de la escala visual.
+    text_matrix = []
+    mid = (zmin + zmax) / 2.0 if zmax > zmin else zmin
+    for row in pivot.values:
+        row_labels_z = []
+        for v in row:
+            if pd.isna(v):
+                row_labels_z.append("—")
+            else:
+                row_labels_z.append(f"{v:.1f}")
+        text_matrix.append(row_labels_z)
+
+    # Color de texto: oscuro sobre celdas claras, claro sobre celdas oscuras
+    textfont_color = []
+    for row in pivot.values:
+        row_colors = []
+        for v in row:
+            if pd.isna(v):
+                row_colors.append("rgba(0,0,0,0)")  # sin texto en faltantes
+            elif v >= mid:
+                row_colors.append("#061A22")  # texto oscuro sobre celda clara
+            else:
+                row_colors.append("#D0ECF4")  # texto claro sobre celda oscura
+        textfont_color.append(row_colors)
 
     fig = go.Figure(go.Heatmap(
         z=pivot.values,
         x=short_cols,
         y=row_labels,
         colorscale=colorscale,
-        text=[[f"{v:.1f}" if not pd.isna(v) else "—" for v in row] for row in pivot.values],
+        zmin=zmin,
+        zmax=zmax,
+        text=text_matrix,
         texttemplate="%{text}",
-        textfont=dict(size=11, color="#E0EEF2"),
+        textfont=dict(size=11, color="#D0ECF4"),   # base: claro (oscuros se ven bien)
         hoverongaps=False,
-        customdata=[[f"{full_col}" for full_col in pivot.columns]
-                    for _ in range(len(pivot))],
         hovertemplate=(
             "<b>%{y}</b><br>"
-            "Dimensión: %{x}<br>"
+            "Aspecto: %{x}<br>"
             "Puntaje promedio: %{z:.1f}<extra></extra>"
         ),
         colorbar=dict(
             tickfont=dict(color=_C_TEXT, size=11),
             outlinecolor="rgba(0,0,0,0)",
+            title=dict(text="Puntaje", font=dict(color=_C_TEXT, size=11)),
         ),
     ))
 
+    # Margen izquierdo proporcional al nombre más largo
+    left_margin = min(max(max(len(r) for r in row_labels) * 7, 160), 340)
+
     fig.update_layout(
         paper_bgcolor=_C_BG,
-        plot_bgcolor=_C_BG,
-        height=max(320, len(pivot) * 55 + 80),
-        margin=dict(l=14, r=14, t=20, b=50),
+        plot_bgcolor="#071A20",   # fondo de celdas faltantes: muy oscuro, neutro
+        height=max(340, len(pivot) * 52 + 100),
+        margin=dict(l=left_margin, r=20, t=24, b=54),
         font=dict(family="IBM Plex Sans, system-ui, sans-serif",
                   color=_C_TEXT, size=12),
         xaxis=dict(

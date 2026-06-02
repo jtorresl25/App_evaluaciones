@@ -16,7 +16,7 @@ def _sem_to_int(semestre_val) -> int:
     Convierte un valor de semestre a entero ordenable.
     - 1, "1" → 1
     - 2, "2" → 2
-    - "V", "v", "Verano" → 5  (verano, entre 2 y siguiente año)
+    - "V", "v", "Verano" → 5
     - 10 → 1, 20 → 2 (formatos YYYYSS)
     - Cualquier otro → 9 (último dentro del año)
     """
@@ -33,14 +33,59 @@ def _sem_to_int(semestre_val) -> int:
         return 9
 
 
+def _parse_periodo_str(s: str) -> tuple[str, int]:
+    """
+    Parsea un string de periodo en (label, order).
+
+    Acepta:
+      "2027-1"  → ("2027-1",  20271)
+      "2027-2"  → ("2027-2",  20272)
+      "202710"  → ("2027-1",  20271)
+      "202720"  → ("2027-2",  20272)
+      "2027.1"  → ("2027-1",  20271)
+      " 2025-2" → ("2025-2",  20252)  (espacios)
+    """
+    s = str(s).strip().replace(" ", "")
+    # Normalizar separador decimal: "2027.1" → "2027-1"
+    if "." in s and "-" not in s:
+        s = s.replace(".", "-", 1)
+    if "-" in s:
+        parts = s.split("-", 1)
+        if len(parts) == 2:
+            try:
+                anio = int(parts[0])
+                sem_raw = parts[1].strip()
+                sem = _sem_to_int(sem_raw)
+                label = f"{anio}-{sem_raw}"
+                return label, anio * 10 + sem
+            except ValueError:
+                pass
+    # Formato numérico de 6 dígitos: 202710 o 202720
+    if s.isdigit() and len(s) == 6:
+        try:
+            anio = int(s[:4])
+            sem_raw = s[4:]
+            sem = _sem_to_int(sem_raw)
+            sem_str = "1" if sem == 1 else "2" if sem == 2 else str(sem)
+            return f"{anio}-{sem_str}", anio * 10 + sem
+        except ValueError:
+            pass
+    return s, 0
+
+
 def _build_periodo_cols(df: pd.DataFrame) -> pd.DataFrame:
     """
     Crea / sobreescribe las columnas:
-      - periodo_label  (str)  "YYYY-S"   — se usa como etiqueta categórica en gráficos
-      - periodo_order  (int)  YYYY * 10 + sem_int — para ordenación cronológica correcta
+      - periodo_label  (str)  "YYYY-S"   — etiqueta categórica en gráficos
+      - periodo_order  (int)  YYYY * 10 + sem_int — ordenación cronológica
 
-    Fuente prioritaria: columnas anio + semestre si existen.
-    Fallback: parsear columna periodo.
+    Fuentes por prioridad:
+    1. Columnas anio + semestre (más confiable)
+    2. Columna periodo (string a parsear)
+    3. Columna periodo_label ya existente (deriva solo periodo_order)
+    4. Fallback: usa índice (sin orden real)
+
+    No usa pd.to_datetime — el periodo es una categoría año-semestre.
     """
     if "anio" in df.columns and "semestre" in df.columns:
         anio_num = pd.to_numeric(df["anio"], errors="coerce")
@@ -53,22 +98,17 @@ def _build_periodo_cols(df: pd.DataFrame) -> pd.DataFrame:
         df["periodo_order"] = (anio_num * 10 + sem_int).astype("Int64")
 
     elif "periodo" in df.columns:
-        def _parse(p):
-            s = str(p).strip()
-            if "-" in s:
-                parts = s.split("-", 1)
-                if len(parts) == 2:
-                    try:
-                        anio = int(parts[0])
-                        sem  = _sem_to_int(parts[1])
-                        return s, anio * 10 + sem
-                    except ValueError:
-                        pass
-            return s, 0
-
-        parsed = df["periodo"].apply(_parse)
+        parsed = df["periodo"].apply(_parse_periodo_str)
         df["periodo_label"] = parsed.apply(lambda x: x[0])
         df["periodo_order"] = parsed.apply(lambda x: x[1]).astype("Int64")
+
+    elif "periodo_label" in df.columns:
+        # periodo_label ya existe: solo derivar periodo_order sin sobreescribir el label
+        df["periodo_order"] = (
+            df["periodo_label"]
+            .apply(lambda p: _parse_periodo_str(str(p))[1])
+            .astype("Int64")
+        )
 
     else:
         df["periodo_label"] = df.index.astype(str)
@@ -82,8 +122,8 @@ def _build_periodo_cols(df: pd.DataFrame) -> pd.DataFrame:
 def filter_period_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     """
     Retorna solo registros de nivel AGREGADO de periodo.
-    Estos son los registros apropiados para gráficos de benchmark y delta general.
-    Si no se encuentra ninguno, retorna el df completo como fallback.
+    Apropiados para gráficos de benchmark y delta general.
+    Si no hay ninguno, retorna el df completo como fallback.
     """
     if df.empty:
         return df
@@ -143,7 +183,6 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df = _to_numeric(df, numeric_cols)
     df = _fill_deltas(df)
 
-    # Crear periodo_label y periodo_order de forma centralizada y robusta
     df = _build_periodo_cols(df)
 
     if "estado_registro" in df.columns:
@@ -158,6 +197,24 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 
     if "modelo_evaluacion" in df.columns:
         df["modelo_evaluacion"] = df["modelo_evaluacion"].astype(str).str.strip()
+
+    # Crear columnas opcionales vacías si no existen (sin mostrar advertencia al usuario)
+    for col in ("fuente", "nota", "calidad_dato", "id_registro"):
+        if col not in df.columns:
+            df[col] = ""
+
+    # Normalizar nombre_curso: strip y espacios múltiples → facilita agrupación
+    if "nombre_curso" in df.columns:
+        df["nombre_curso"] = (
+            df["nombre_curso"].astype(str).str.strip()
+            .str.replace(r"\s+", " ", regex=True)
+        )
+
+    # codigo_curso: normalizar a mayúsculas y sin espacios para búsquedas
+    if "codigo_curso" in df.columns:
+        df["codigo_curso"] = (
+            df["codigo_curso"].astype(str).str.strip().str.upper()
+        )
 
     return df
 
@@ -214,12 +271,12 @@ def build_subsets(df: pd.DataFrame) -> dict:
     }
 
 
-# ── Helpers para BASE_DETALLE_PDF ────────────────────────────────────────────
+# ── Helpers para BASE_DETALLE ─────────────────────────────────────────────────
 
 def _to_bool(series: pd.Series) -> pd.Series:
     """
     Convierte a booleano robusto desde: True/False, 'TRUE'/'FALSE',
-    'Verdadero'/'Falso', 'SÍ'/'NO', 1/0, y sus variantes.
+    'Verdadero'/'Falso', 'SÍ'/'NO', 1/0.
     Valores nulos → False.
     """
     if series.dtype == bool:
@@ -238,13 +295,11 @@ def _to_bool(series: pd.Series) -> pd.Series:
     return series.apply(_cvt)
 
 
-def _normalize_pdf_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
+def _normalize_detalle_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Remapea el esquema antiguo de BASE_DETALLE_PDF al nuevo.
-    Crea columnas derivadas que no existían en el esquema anterior.
+    Remapea el esquema antiguo de BASE_DETALLE (antes BASE_DETALLE_PDF) al nuevo.
     Solo actúa si se detectan columnas del esquema antiguo.
     """
-    # Renombrar columnas antiguas → nuevas (solo si la nueva no existe ya)
     _REMAP = {
         "id_detalle":    "id_pdf",
         "periodo":       "periodo_label",
@@ -259,7 +314,6 @@ def _normalize_pdf_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
         if old in df.columns and new not in df.columns:
             df = df.rename(columns={old: new})
 
-    # Derivar periodo_id si falta
     if "periodo_label" in df.columns and "periodo_id" not in df.columns:
         def _pid(lbl):
             parts = str(lbl).split("-")
@@ -274,7 +328,6 @@ def _normalize_pdf_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
             return None
         df["periodo_id"] = df["periodo_label"].apply(_pid)
 
-    # Derivar anio / semestre si faltan
     if "periodo_label" in df.columns:
         if "anio" not in df.columns:
             df["anio"] = df["periodo_label"].apply(
@@ -285,7 +338,6 @@ def _normalize_pdf_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
                 lambda x: str(x).split("-")[1].strip() if "-" in str(x) else None
             )
 
-    # Derivar es_resumen_semestre_ponderado
     if "es_resumen_semestre_ponderado" not in df.columns:
         if "aspecto" in df.columns and "nivel_comparacion" in df.columns:
             _niveles = {"Profesor", "Facultad", "Universidad"}
@@ -300,7 +352,6 @@ def _normalize_pdf_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
         else:
             df["es_resumen_semestre_ponderado"] = False
 
-    # Derivar tiene_puntaje_calculado
     if "tiene_puntaje_calculado" not in df.columns:
         if "valor_central" in df.columns:
             nc_mask = pd.Series(False, index=df.index)
@@ -310,17 +361,17 @@ def _normalize_pdf_old_to_new(df: pd.DataFrame) -> pd.DataFrame:
         else:
             df["tiene_puntaje_calculado"] = False
 
-    # estado_calculo: si no existe, derivar de estado_revision (esquema antiguo)
     if "estado_calculo" not in df.columns and "estado_revision" in df.columns:
         df["estado_calculo"] = df["estado_revision"]
 
     return df
 
 
-def clean_pdf(df: pd.DataFrame) -> pd.DataFrame:
+def clean_detalle(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Limpieza completa de BASE_DETALLE_PDF.
-    Acepta tanto el nuevo esquema (v2) como el antiguo.
+    Limpieza completa de BASE_DETALLE (antes BASE_DETALLE_PDF).
+    Acepta el nuevo esquema (v2) o el esquema antiguo (normaliza automáticamente).
+    Acepta periodos futuros (2027+) sin límites hardcodeados.
     """
     if df is None:
         return None
@@ -331,7 +382,7 @@ def clean_pdf(df: pd.DataFrame) -> pd.DataFrame:
     _old_markers = {"id_detalle", "puntaje", "estado_revision"}
     _new_markers = {"valor_central", "nivel_comparacion", "es_resumen_semestre_ponderado"}
     if (_old_markers & set(df.columns)) and not (_new_markers & set(df.columns)):
-        df = _normalize_pdf_old_to_new(df)
+        df = _normalize_detalle_old_to_new(df)
 
     # Columnas numéricas
     for col in ("valor_central", "inscritos", "evaluaciones",
@@ -339,21 +390,44 @@ def clean_pdf(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Columnas booleanas — manejo robusto de TRUE/FALSE/1/0/texto
+    # Columnas booleanas
     for col in ("es_resumen_semestre_ponderado",
                 "tiene_puntaje_calculado",
                 "requiere_revision"):
         if col in df.columns:
             df[col] = _to_bool(df[col])
 
-    # periodo_label asegurado como string limpio
+    # periodo_label como string limpio
     if "periodo_label" in df.columns:
         df["periodo_label"] = df["periodo_label"].astype(str).str.strip()
     elif "periodo" in df.columns:
         df["periodo_label"] = df["periodo"].astype(str).str.strip()
 
-    # periodo_order para ordenación cronológica
+    # periodo_order para ordenación cronológica (sin límites de año)
     if "periodo_label" in df.columns and "periodo_order" not in df.columns:
         df = _build_periodo_cols(df)
 
+    # Crear columnas opcionales si no existen — evita KeyErrors en plots/sections
+    if "confianza_extraccion" not in df.columns:
+        if "confianza" in df.columns:
+            df["confianza_extraccion"] = df["confianza"].astype(str).str.strip()
+        else:
+            df["confianza_extraccion"] = "No especificada"
+
+    if "requiere_revision" not in df.columns:
+        df["requiere_revision"] = False
+
+    if "estado_calculo" not in df.columns:
+        df["estado_calculo"] = "OK"
+
+    if "nota_validacion" not in df.columns:
+        df["nota_validacion"] = ""
+
+    if "metodo_extraccion" not in df.columns:
+        df["metodo_extraccion"] = ""
+
     return df
+
+
+# Alias de compatibilidad: mantener clean_pdf para no romper imports antiguos
+clean_pdf = clean_detalle

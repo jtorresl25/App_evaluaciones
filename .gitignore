@@ -1,23 +1,35 @@
 # Entorno virtual
 .venv/
 venv/
+
 # Python
 __pycache__/
+*.pyc
+*.pyo
+
 # Streamlit
 .streamlit/secrets.toml
-# Datos sensibles
+
+# Datos sensibles — nunca subir al repo
 data/local_private/
 *.xlsx
 *.xlsb
 *.xls
 *.csv
-# Excepciones permitidas para muestras anonimizadas
-!data/sample/
-!data/sample/*.xlsx
-!data/sample/*.csv
+~$*.xlsx
+~$*.xls
+
+# Diseño de referencia (puede contener datos de la persona evaluada)
+assets/html_design/
+
 # Sistema
 .DS_Store
 Thumbs.db
+
 # IDE
 .vscode/
 .idea/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb

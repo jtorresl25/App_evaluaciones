@@ -1,7 +1,7 @@
 """
-Funciones de análisis para BASE_DETALLE_PDF.
+Funciones de análisis para BASE_DETALLE (antes BASE_DETALLE_PDF).
 No mezclan datos con BASE_GENERAL_DOCENTE ni alimentan KPIs principales.
-Los valores son estimaciones visuales desde PDFs.
+Los datos pueden provenir de PDFs, carga manual o consolidaciones futuras.
 """
 from __future__ import annotations
 import pandas as pd
@@ -36,8 +36,8 @@ def _sort_periodos(df: pd.DataFrame) -> pd.DataFrame:
 
 def compute_pdf_metrics(df: pd.DataFrame) -> dict:
     """
-    Calcula KPIs desde BASE_DETALLE_PDF.
-    Retorna dict con todos los indicadores para la sección PDF.
+    Calcula KPIs desde BASE_DETALLE.
+    Retorna dict con todos los indicadores para la sección de detalle.
     """
     empty = {
         "periodos_pdf": 0, "cursos_unicos_pdf": 0,

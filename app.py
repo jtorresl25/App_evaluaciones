@@ -26,12 +26,12 @@ st.markdown(
 
 # ── Importaciones del proyecto ────────────────────────────────────────────────
 from app.utils.data_loader import load_excel
-from app.utils.data_cleaning import clean, build_subsets, clean_pdf
+from app.utils.data_cleaning import clean, build_subsets, clean_detalle
 from app.utils.metrics import compute
-from app.utils.pdf_analysis import compute_pdf_metrics
+from app.utils.pdf_analysis import compute_pdf_metrics as compute_detalle_metrics
 from app.components import sections
 
-_DEFAULT_TEACHER = "Juan Pablo Ramos Bonilla"
+_DEFAULT_TEACHER = "el profesor"
 
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
@@ -53,12 +53,10 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # Valores por defecto para cuando no hay archivo cargado
     filtro_modelo   = None
-    filtro_cursos   = []
     filtro_periodos = []
-
-    if uploaded_file is not None:
-        st.markdown("**Filtros**")
+    mostrar_detalle = True
 
     sidebar_filtros_placeholder = st.empty()
 
@@ -101,75 +99,99 @@ else:
             st.stop()
 
         df_general_raw = raw["df_general"]
-        df_pdf_raw     = raw["df_pdf"]
+        df_detalle_raw = raw["df_detalle"]
 
-        df_clean = clean(df_general_raw)
-        subsets  = build_subsets(df_clean)
-        df_pdf   = clean_pdf(df_pdf_raw)
-        metrics  = compute(subsets, df_clean)
+        df_clean       = clean(df_general_raw)
+        subsets        = build_subsets(df_clean)
+        df_detalle     = clean_detalle(df_detalle_raw)
+        metrics        = compute(subsets, df_clean)
 
-        # Métricas PDF (no alimentan KPIs principales)
-        pdf_metrics = compute_pdf_metrics(df_pdf) if df_pdf is not None else {}
-
-        # Nombre del docente: detectado en el archivo, con fallback al default
+        detalle_metrics = compute_detalle_metrics(df_detalle) if df_detalle is not None else {}
         teacher_name_detected = raw.get("teacher_name") or _DEFAULT_TEACHER
 
-    # ── Filtros dinámicos + nombre del docente en sidebar ─────────────────────
+    # ── Sidebar: nombre del docente + checkbox detalle + filtros avanzados ────
     with sidebar_filtros_placeholder.container():
-        # Nombre editable
         nombre_docente = st.text_input(
             "Nombre del docente",
             value=teacher_name_detected,
             key="nombre_docente",
-            help="Puedes editar temporalmente el nombre que aparece en el dashboard.",
+            help="Puedes editar el nombre que aparece en el dashboard.",
         )
 
-        st.markdown("**Filtros de datos**")
+        st.markdown("---")
 
-        modelos_disp = sorted(
-            df_clean["modelo_evaluacion"].dropna().unique().tolist()
-        ) if "modelo_evaluacion" in df_clean.columns else []
-
-        filtro_modelo = st.multiselect(
-            "Modelo de evaluación",
-            options=modelos_disp,
-            default=modelos_disp,
-            key="filtro_modelo",
+        # Checkbox para mostrar u ocultar la pestaña de detalle auxiliar
+        tiene_detalle = df_detalle is not None
+        mostrar_detalle = st.checkbox(
+            "Mostrar datos auxiliares",
+            value=tiene_detalle,
+            key="mostrar_detalle",
+            disabled=not tiene_detalle,
+            help=(
+                "Muestra la pestaña con datos de BASE_DETALLE."
+                if tiene_detalle
+                else "El Excel no contiene la hoja BASE_DETALLE."
+            ),
         )
 
-        cursos_disp = sorted(
-            df_clean[df_clean["es_valido_desempeno"]]["nombre_curso"]
-            .dropna().unique().tolist()
-        ) if "nombre_curso" in df_clean.columns else []
+        # Filtros avanzados — colapsados por defecto para no saturar la vista
+        with st.expander("Filtros avanzados", expanded=False):
+            st.caption(
+                "Por defecto la app muestra toda la información. "
+                "Usa estos filtros solo si quieres enfocar el análisis."
+            )
 
-        filtro_cursos = st.multiselect(
-            "Cursos (opcional)",
-            options=cursos_disp,
-            default=[],
-            key="filtro_cursos",
-            placeholder="Todos los cursos",
-        )
+            modelos_disp = sorted(
+                df_clean["modelo_evaluacion"].dropna().unique().tolist()
+            ) if "modelo_evaluacion" in df_clean.columns else []
 
-        periodos_disp = sorted(
-            df_clean["periodo_label"].dropna().unique().tolist()
-        ) if "periodo_label" in df_clean.columns else []
+            filtro_modelo = st.multiselect(
+                "Modelo de evaluación",
+                options=modelos_disp,
+                default=modelos_disp,
+                key="filtro_modelo",
+            )
 
-        filtro_periodos = st.multiselect(
-            "Periodos (opcional)",
-            options=periodos_disp,
-            default=[],
-            key="filtro_periodos",
-            placeholder="Todos los periodos",
-        )
+            # Periodos en orden cronológico real (no alfabético)
+            if "periodo_label" in df_clean.columns and "periodo_order" in df_clean.columns:
+                _pmap = (
+                    df_clean[["periodo_label", "periodo_order"]]
+                    .dropna().drop_duplicates()
+                    .set_index("periodo_label")["periodo_order"]
+                    .to_dict()
+                )
+                periodos_disp = sorted(
+                    df_clean["periodo_label"].dropna().unique().tolist(),
+                    key=lambda p: _pmap.get(p, 999_999),
+                )
+            elif "periodo_label" in df_clean.columns:
+                periodos_disp = sorted(df_clean["periodo_label"].dropna().unique().tolist())
+            else:
+                periodos_disp = []
 
-    # ── Aplicar filtros ───────────────────────────────────────────────────────
+            filtro_periodos = st.multiselect(
+                "Periodos",
+                options=periodos_disp,
+                default=[],
+                key="filtro_periodos",
+                placeholder="Todos los periodos",
+            )
+
+    # ── Aplicar filtros (solo los avanzados que aún existen) ─────────────────
     df_filtered = df_clean.copy()
     if filtro_modelo:
         df_filtered = df_filtered[df_filtered["modelo_evaluacion"].isin(filtro_modelo)]
-    if filtro_cursos:
-        df_filtered = df_filtered[df_filtered["nombre_curso"].isin(filtro_cursos)]
     if filtro_periodos:
         df_filtered = df_filtered[df_filtered["periodo_label"].isin(filtro_periodos)]
+
+    # Guardia: si los filtros vaciaron el df, mostrar aviso y usar datos completos
+    if df_filtered[df_filtered["es_valido_desempeno"]].empty and not df_clean[df_clean["es_valido_desempeno"]].empty:
+        st.warning(
+            "La combinación de filtros seleccionada no devuelve registros válidos. "
+            "Se muestran todos los datos disponibles.",
+            icon="⚠️",
+        )
+        df_filtered = df_clean.copy()
 
     subsets_f = build_subsets(df_filtered)
     metrics_f = compute(subsets_f, df_filtered)
@@ -189,8 +211,7 @@ else:
     )
     anio_min = anio_max = ""
     if "anio" in df_clean.columns:
-        anos = df_clean["anio"].dropna()
-        anos_num = pd.to_numeric(anos, errors="coerce").dropna().astype(int)
+        anos_num = pd.to_numeric(df_clean["anio"], errors="coerce").dropna().astype(int)
         if not anos_num.empty:
             anio_min, anio_max = int(anos_num.min()), int(anos_num.max())
     rango = f"{anio_min}–{anio_max}" if anio_min and anio_min != anio_max else str(anio_min)
@@ -202,8 +223,8 @@ else:
 
     # ── Navegación por tabs ───────────────────────────────────────────────────
     tab_labels = ["📊 Resumen ejecutivo"]
-    if df_pdf is not None:
-        tab_labels.append("📊 Desempeño Detallado")
+    if df_detalle is not None and mostrar_detalle:
+        tab_labels.append("📋 Datos auxiliares")
 
     tabs = st.tabs(tab_labels)
 
@@ -227,10 +248,6 @@ else:
         sections.render_comparacion_relativa_section(metrics_f)
 
         st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-        df_cursos_f = subsets_f.get("df_cursos_individuales", pd.DataFrame())
-        sections.render_cursos_section(df_cursos_f, metrics_f)
-
-        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
         sections.render_metodologia_section()
 
         st.markdown(
@@ -243,7 +260,7 @@ else:
             unsafe_allow_html=True,
         )
 
-    # ── Tab 2: Detalle PDF ────────────────────────────────────────────────────
-    if df_pdf is not None and len(tabs) > 1:
+    # ── Tab 2: Datos auxiliares (BASE_DETALLE) ────────────────────────────────
+    if df_detalle is not None and mostrar_detalle and len(tabs) > 1:
         with tabs[1]:
-            sections.render_pdf_detail_section(df_pdf, pdf_metrics)
+            sections.render_detalle_section(df_detalle, detalle_metrics)

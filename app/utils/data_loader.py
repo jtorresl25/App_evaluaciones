@@ -1,31 +1,34 @@
 import pandas as pd
 import streamlit as st
 
-SHEET_GENERAL = "BASE_GENERAL_DOCENTE"
-SHEET_PDF     = "BASE_DETALLE_PDF"
+SHEET_GENERAL        = "BASE_GENERAL_DOCENTE"
+SHEET_DETALLE        = "BASE_DETALLE"          # hoja oficial desde ahora
+SHEET_DETALLE_LEGACY = "BASE_DETALLE_PDF"      # fallback: hoja anterior
 
-# ── Columnas obligatorias BASE_GENERAL_DOCENTE ────────────────────────────────
-REQUIRED_COLS_GENERAL = [
-    "id_registro", "periodo", "anio", "semestre", "modelo_evaluacion",
-    "escala_original", "nivel_analisis", "codigo_curso", "nombre_curso",
-    "puntaje_profesor", "benchmark_universidad", "benchmark_facultad",
-    "benchmark_departamento", "delta_vs_universidad", "delta_vs_facultad",
-    "delta_vs_departamento", "estado_registro", "calidad_dato", "fuente",
+# ── Columnas verdaderamente críticas (sin estas la app no puede calcular KPIs) ─
+REQUIRED_COLS_GENERAL_CRITICAL = [
+    "periodo", "modelo_evaluacion", "nivel_analisis", "codigo_curso",
+    "nombre_curso", "puntaje_profesor", "benchmark_universidad",
+    "benchmark_facultad", "estado_registro",
+]
+# Columnas opcionales: si no existen se crean vacías internamente sin avisar al usuario
+REQUIRED_COLS_GENERAL_OPTIONAL = [
+    "id_registro", "anio", "semestre", "escala_original", "benchmark_departamento",
+    "delta_vs_universidad", "delta_vs_facultad", "delta_vs_departamento",
+    "calidad_dato", "fuente", "nota",
 ]
 
-# ── Columnas críticas nuevo esquema BASE_DETALLE_PDF (v2) ────────────────────
-# Si TODAS están presentes → nuevo esquema, sin warning.
-REQUIRED_COLS_PDF_NEW_CRITICAL = [
-    "periodo_label", "aspecto", "nivel_comparacion", "valor_central",
-    "es_resumen_semestre_ponderado", "tiene_puntaje_calculado",
-    "estado_calculo", "confianza_extraccion", "requiere_revision",
+# ── Columnas mínimas para mostrar BASE_DETALLE ────────────────────────────────
+# Solo estas tres son necesarias para que la sección funcione
+REQUIRED_COLS_DETALLE_MIN = [
+    "aspecto", "nivel_comparacion", "valor_central",
 ]
-# Marcadores que identifican inequívocamente el nuevo esquema
+# Marcadores que identifican inequívocamente el nuevo esquema v2
+# (se usan para detección de esquema, no para validación de completitud)
 _NEW_SCHEMA_MARKERS = frozenset({
     "valor_central", "nivel_comparacion", "es_resumen_semestre_ponderado",
     "id_pdf", "curso_codigo_base",
 })
-# Marcadores del esquema anterior
 _OLD_SCHEMA_MARKERS = frozenset({"id_detalle", "puntaje", "estado_revision"})
 
 
@@ -36,7 +39,6 @@ def _detect_teacher_name(xl: pd.ExcelFile, df_general: pd.DataFrame) -> str | No
     2. Columna de BASE_GENERAL_DOCENTE → docente / profesor / nombre_docente
     Retorna None si no encuentra nada (el llamador usa el default).
     """
-    # 1. CONFIG_APP
     if "CONFIG_APP" in xl.sheet_names:
         try:
             cfg = xl.parse("CONFIG_APP")
@@ -51,7 +53,6 @@ def _detect_teacher_name(xl: pd.ExcelFile, df_general: pd.DataFrame) -> str | No
         except Exception:
             pass
 
-    # 2. BASE_GENERAL_DOCENTE
     if df_general is not None:
         for col in ("docente", "profesor", "nombre_docente", "nombre_profesor", "nombre"):
             if col in df_general.columns:
@@ -66,13 +67,17 @@ def _detect_teacher_name(xl: pd.ExcelFile, df_general: pd.DataFrame) -> str | No
 
 def load_excel(uploaded_file) -> dict:
     """
-    Lee BASE_GENERAL_DOCENTE y (opcionalmente) BASE_DETALLE_PDF.
+    Lee BASE_GENERAL_DOCENTE y (opcionalmente) BASE_DETALLE.
+    Si BASE_DETALLE no existe pero sí BASE_DETALLE_PDF, usa esta última como
+    fallback y muestra una advertencia suave.
+    La app NO se rompe si la hoja de detalle no existe: simplemente la oculta.
+
     Retorna:
       {
-        "df_general":   DataFrame,
-        "df_pdf":       DataFrame | None,
-        "pdf_schema":   "new" | "old" | "unknown" | None,
-        "teacher_name": str | None,   # None si no se detecta en el archivo
+        "df_general":     DataFrame,
+        "df_detalle":     DataFrame | None,
+        "detalle_schema": "new" | "old" | "unknown" | None,
+        "teacher_name":   str | None,
       }
     """
     try:
@@ -93,55 +98,69 @@ def load_excel(uploaded_file) -> dict:
         str(c).strip().lower().replace(" ", "_") for c in df_general.columns
     ]
 
-    missing_gen = [c for c in REQUIRED_COLS_GENERAL if c not in df_general.columns]
-    if missing_gen:
+    # Solo advertir si faltan columnas verdaderamente críticas para los KPIs
+    missing_critical = [c for c in REQUIRED_COLS_GENERAL_CRITICAL if c not in df_general.columns]
+    if missing_critical:
         st.warning(
-            f"Faltan columnas en {SHEET_GENERAL}: {', '.join(missing_gen)}. "
-            f"Algunos indicadores pueden no calcularse."
+            f"Faltan columnas en {SHEET_GENERAL}: {', '.join(missing_critical)}. "
+            f"Algunos indicadores no se calcularán correctamente."
         )
+    # Las columnas opcionales (fuente, nota, calidad_dato, delta, etc.) se crean
+    # internamente en data_cleaning.clean() si no existen — sin mostrar mensaje.
 
-    # ── BASE_DETALLE_PDF ──────────────────────────────────────────────────────
-    df_pdf      = None
-    pdf_schema  = None
+    # ── BASE_DETALLE (con fallback silencioso a BASE_DETALLE_PDF) ────────────
+    df_detalle     = None
+    detalle_schema = None
+    sheet_leida    = None
 
-    if SHEET_PDF in xl.sheet_names:
-        df_pdf = xl.parse(SHEET_PDF)
-        df_pdf.columns = [
-            str(c).strip().lower().replace(" ", "_") for c in df_pdf.columns
+    if SHEET_DETALLE in xl.sheet_names:
+        sheet_leida = SHEET_DETALLE
+    elif SHEET_DETALLE_LEGACY in xl.sheet_names:
+        sheet_leida = SHEET_DETALLE_LEGACY
+        st.info(
+            f"Se detectó la hoja antigua **{SHEET_DETALLE_LEGACY}**. "
+            f"Se recomienda renombrarla a **{SHEET_DETALLE}**."
+        )
+    # Si ninguna existe, df_detalle queda en None → sección de detalle se oculta
+
+    if sheet_leida:
+        df_detalle = xl.parse(sheet_leida)
+        df_detalle.columns = [
+            str(c).strip().lower().replace(" ", "_") for c in df_detalle.columns
         ]
-        cols = set(df_pdf.columns)
+        cols = set(df_detalle.columns)
 
         if cols & _NEW_SCHEMA_MARKERS:
-            pdf_schema = "new"
-            # Solo alertar si faltan columnas CRÍTICAS del nuevo esquema
-            missing_crit = [c for c in REQUIRED_COLS_PDF_NEW_CRITICAL if c not in cols]
-            if missing_crit:
-                st.warning(
-                    f"BASE_DETALLE_PDF (nuevo esquema) no tiene columnas críticas: "
-                    f"{', '.join(missing_crit)}. Revisa la hoja GUIA_ACTUALIZACION."
+            detalle_schema = "new"
+            # Advertir solo si faltan las columnas mínimas para mostrar datos
+            missing_min = [c for c in REQUIRED_COLS_DETALLE_MIN if c not in cols]
+            if missing_min:
+                st.caption(
+                    f"BASE_DETALLE fue cargada con campos incompletos "
+                    f"({', '.join(missing_min)} no encontradas); "
+                    f"se mostrarán los campos disponibles."
                 )
-            # Si todas las críticas están → no mostrar ningún mensaje
-
+            # Columnas opcionales (confianza_extraccion, requiere_revision, etc.)
+            # se rellenan automáticamente en clean_detalle() — sin mostrar mensaje.
         elif cols & _OLD_SCHEMA_MARKERS:
-            pdf_schema = "old"
+            detalle_schema = "old"
             st.info(
-                "BASE_DETALLE_PDF usa el esquema anterior. "
+                f"{sheet_leida} usa el esquema anterior. "
                 "Se aplicará normalización automática para compatibilidad."
             )
-
         else:
-            pdf_schema = "unknown"
-            st.warning(
-                "BASE_DETALLE_PDF tiene un esquema no reconocido. "
-                "Se intentará mostrar la información disponible."
+            detalle_schema = "unknown"
+            st.caption(
+                f"{sheet_leida} tiene columnas no reconocidas. "
+                "Se mostrará la información disponible."
             )
 
     # ── Nombre del docente ────────────────────────────────────────────────────
     teacher_name = _detect_teacher_name(xl, df_general)
 
     return {
-        "df_general":   df_general,
-        "df_pdf":       df_pdf,
-        "pdf_schema":   pdf_schema,
-        "teacher_name": teacher_name,
+        "df_general":     df_general,
+        "df_detalle":     df_detalle,
+        "detalle_schema": detalle_schema,
+        "teacher_name":   teacher_name,
     }

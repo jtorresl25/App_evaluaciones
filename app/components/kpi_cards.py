@@ -145,7 +145,7 @@ def render_kpi_row_hero(metrics: dict) -> None:
 
 
 def render_kpi_row_secondary(metrics: dict) -> None:
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         render_kpi_card(
             label="Cursos únicos",
@@ -159,12 +159,6 @@ def render_kpi_row_secondary(metrics: dict) -> None:
             footer="en la base general",
         )
     with col3:
-        render_kpi_card(
-            label="Sin docencia / N.A.",
-            value=metrics.get("registros_sin_docencia"),
-            footer="excluido de promedios y gráficas",
-        )
-    with col4:
         render_kpi_card(
             label="Periodos válidos total",
             value=metrics.get("total_periodos_validos"),

@@ -419,16 +419,15 @@ def _render_cursos_tab(df: pd.DataFrame, escala_label: str) -> None:
         st.dataframe(tabla, use_container_width=True, hide_index=True)
 
 
-# ── Desempeño Detallado (BASE_DETALLE_PDF) ────────────────────────────────────
-def _render_page_kpis(pdf_metrics: dict, rubros_evaluados: int) -> None:
-    """KPI cards de página para la sección Desempeño Detallado."""
-    _eyebrow("Resumen de datos disponibles")
+# ── Detalle por curso y aspecto (BASE_DETALLE) ────────────────────────────────
+def _render_page_kpis(detalle_metrics: dict, rubros_evaluados: int) -> None:
+    """KPI cards de página para la sección Detalle por curso."""
+    _eyebrow("Resumen de datos auxiliares")
     kpis = [
-        ("Cursos únicos",         pdf_metrics.get("cursos_unicos_pdf", 0),   "en la base"),
-        ("Cursos con puntaje",    pdf_metrics.get("cursos_con_puntaje", 0),  "calculado OK"),
-        ("Rubros evaluados",      rubros_evaluados,                          "dimensiones"),
-        ("Periodos con detalle",  pdf_metrics.get("periodos_pdf", 0),        "semestres"),
-        ("Registros por revisar", pdf_metrics.get("registros_a_revisar", 0), "marcados para revisión"),
+        ("Cursos únicos",        detalle_metrics.get("cursos_unicos_pdf", 0),  "en la base"),
+        ("Cursos con puntaje",   detalle_metrics.get("cursos_con_puntaje", 0), "calculado OK"),
+        ("Aspectos evaluados",   rubros_evaluados,                             "dimensiones"),
+        ("Periodos con detalle", detalle_metrics.get("periodos_pdf", 0),       "semestres"),
     ]
     cols = st.columns(len(kpis))
     for col, (label, val, foot) in zip(cols, kpis):
@@ -443,24 +442,14 @@ def _render_page_kpis(pdf_metrics: dict, rubros_evaluados: int) -> None:
             unsafe_allow_html=True,
         )
 
-    # Alerta discreta si hay cursos NC (no como tarjeta principal)
-    cursos_nc = pdf_metrics.get("cursos_nc", 0) or 0
-    if cursos_nc > 0:
-        plural = "curso" if cursos_nc == 1 else "cursos"
-        st.markdown(
-            f'<div style="margin-top:10px;padding:8px 14px;border-radius:8px;'
-            f'background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.22);'
-            f'font-size:12.5px;color:{_GOLD};font-family:{_FONT};line-height:1.5">'
-            f'Hay <b>{cursos_nc}</b> {plural} sin cálculo por condiciones de respuesta. '
-            f'No se incluyen en promedios ni gráficos.</div>',
-            unsafe_allow_html=True,
-        )
+    # Los registros NC/sin cálculo se excluyen internamente — no se muestra alerta visible.
 
 
-def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
+def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> None:
     """
-    Sección Desempeño Detallado por Curso y Dimensión.
+    Sección Detalle por curso y aspecto (BASE_DETALLE).
     Análisis a nivel de curso individual: evolución, dimensiones, heatmap.
+    Acepta periodos futuros dinámicamente (2027+).
     No muestra gráficos globales (tendencia ponderada, comparación institucional).
     """
     from app.utils.plots import (
@@ -472,19 +461,24 @@ def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
         _sorted_periodos,
     )
 
+    # Alias interno para mantener legibilidad del código existente
+    df_pdf = df_detalle
+    pdf_metrics = detalle_metrics
+
     # ── Encabezado ────────────────────────────────────────────────────────────
-    _eyebrow("Análisis por curso y dimensión")
+    _eyebrow("Detalle por curso y aspecto")
     st.markdown(
         f'<h2 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px;'
         f'font-size:clamp(20px,2.5vw,30px)">'
-        f'Desempeño Detallado por Curso y Dimensión</h2>',
+        f'Detalle por curso y aspecto</h2>',
         unsafe_allow_html=True,
     )
     st.markdown(
         f'<p style="font-size:14px;color:{_TEXT_P2};font-family:{_FONT};'
         f'margin-bottom:16px;line-height:1.55">'
-        f'Explora el comportamiento de cada curso por rubro de docencia, '
-        f'periodo y nivel de comparación.</p>',
+        f'Información auxiliar proveniente de reportes, extracción manual o consolidaciones '
+        f'por curso/aspecto. Estos datos no alimentan los KPIs principales salvo que se '
+        f'integren explícitamente en BASE_GENERAL_DOCENTE.</p>',
         unsafe_allow_html=True,
     )
 
@@ -542,16 +536,9 @@ def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
         st.warning("No se encontraron cursos individuales en los datos.")
         return
 
-    # Default: ICYA3601 si existe; si no, curso con más periodos con puntaje
+    # Default: curso con más periodos con puntaje calculado
     default_idx = 0
-    found_icya = False
-    for i, op in enumerate(opciones_cursos):
-        if "ICYA3601" in op:
-            default_idx = i
-            found_icya = True
-            break
-
-    if not found_icya and (
+    if (
         "tiene_puntaje_calculado" in df_pdf.columns
         and "curso_codigo_base" in df_pdf.columns
         and "periodo_label" in df_pdf.columns
@@ -568,7 +555,7 @@ def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
                     break
 
     # ── Selectores ────────────────────────────────────────────────────────────
-    col_sel, col_period, col_nivel, col_viz = st.columns([2.5, 1, 1, 1])
+    col_sel, col_period, col_nivel = st.columns([2.5, 1, 1])
 
     with col_sel:
         sel_op = st.selectbox(
@@ -590,16 +577,8 @@ def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
         f_nivel_str = st.selectbox(
             "Nivel de comparación",
             ["Todos"] + niveles_curso,
-            index=1,
+            index=0,     # "Todos" por defecto → muestra Profesor + benchmarks juntos
             key="dd_nivel",
-        )
-
-    with col_viz:
-        f_viz = st.selectbox(
-            "Visualización",
-            ["Barras", "Radar", "Tendencia"],
-            index=0,
-            key="dd_viz",
         )
 
     # ── Filtrar datos del curso ───────────────────────────────────────────────
@@ -650,9 +629,9 @@ def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
 
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
     tab_res, tab_tend, tab_mapa, tab_datos = st.tabs([
-        "📊 Resumen del curso",
-        "📈 Tendencia por rubro",
-        "🗺️ Mapa de fortalezas",
+        "📊 Resumen auxiliar",
+        "📈 Tendencia por aspecto",
+        "🗺️ Mapa de desempeño",
         "📋 Datos",
     ])
 
@@ -680,43 +659,18 @@ def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
 
         _divider()
 
-        # Gráfico de dimensiones (excluye Puntaje global)
-        _graph_label("Perfil por dimensiones del curso")
+        # Gráfico de dimensiones (excluye Puntaje global) — siempre barras
+        _graph_label("Perfil por aspectos del curso")
         df_dims = (
             df_plot[
                 df_plot["aspecto"].astype(str).str.strip().str.lower() != "puntaje global"
             ].copy()
             if "aspecto" in df_plot.columns else df_plot.copy()
         )
-
-        if f_viz == "Radar":
-            st.plotly_chart(
-                plot_radar(df_dims, niveles_activos),
-                use_container_width=True, config=_CHART_CONFIG,
-            )
-        elif f_viz == "Tendencia":
-            if "aspecto" in df_con_puntaje.columns:
-                asp_disp_r = _ordered_aspects(
-                    df_con_puntaje["aspecto"].dropna().unique().tolist()
-                )
-            else:
-                asp_disp_r = []
-            _def_r = [
-                "Coherencia",
-                "Retroalimentación, monitoreo y criterios de calificación",
-                "Trato a estudiantes",
-            ]
-            default_asp_r = [a for a in _def_r if a in asp_disp_r] or asp_disp_r[:3]
-            nivel_tend_r = f_nivel_str if f_nivel_str != "Todos" else "Profesor curso"
-            st.plotly_chart(
-                plot_tendencia_curso(df_con_puntaje, default_asp_r, nivel_tend_r),
-                use_container_width=True, config=_CHART_CONFIG,
-            )
-        else:  # Barras
-            st.plotly_chart(
-                plot_dimensiones_barras(df_dims, niveles_activos),
-                use_container_width=True, config=_CHART_CONFIG,
-            )
+        st.plotly_chart(
+            plot_dimensiones_barras(df_dims, niveles_activos),
+            use_container_width=True, config=_CHART_CONFIG,
+        )
 
     # ── Tendencia por rubro ───────────────────────────────────────────────────
     with tab_tend:
@@ -751,16 +705,28 @@ def render_pdf_detail_section(df_pdf: pd.DataFrame, pdf_metrics: dict) -> None:
             use_container_width=True, config=_CHART_CONFIG,
         )
 
-    # ── Mapa de fortalezas ────────────────────────────────────────────────────
+    # ── Mapa de desempeño ─────────────────────────────────────────────────────
     with tab_mapa:
         st.markdown(
-            f'<h4 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 6px">'
-            f'Mapa de fortalezas por curso y dimensión</h4>',
+            f'<h4 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px">'
+            f'Mapa auxiliar de desempeño por curso y aspecto</h4>',
             unsafe_allow_html=True,
         )
-        st.caption(
-            "Puntaje promedio del Profesor por curso y dimensión · "
-            "Nivel: Profesor curso · Sin registros NC ni sin puntaje."
+        st.markdown(
+            f'<p style="font-size:13px;color:{_TEXT_P2};font-family:{_FONT};'
+            f'margin-bottom:4px;line-height:1.5">'
+            f'Promedio de puntajes registrados en BASE_DETALLE por curso y aspecto. '
+            f'La intensidad del color muestra diferencias relativas entre fortalezas; '
+            f'los valores faltantes indican ausencia de dato.</p>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div style="margin-bottom:10px;padding:6px 12px;border-radius:7px;'
+            f'background:rgba(90,215,232,0.07);border:1px solid rgba(90,215,232,0.18);'
+            f'font-size:11.5px;color:{_TEXT_P2};font-family:{_FONT}">'
+            f'Los KPIs principales se calculan únicamente desde BASE_GENERAL_DOCENTE. '
+            f'Esta vista resume datos auxiliares de BASE_DETALLE.</div>',
+            unsafe_allow_html=True,
         )
         st.plotly_chart(
             plot_heatmap_cursos(df_pdf),
@@ -803,7 +769,6 @@ def _render_curso_kpis(df_con_puntaje: pd.DataFrame, df_curso_full: pd.DataFrame
     prom_global = None
     ultimo_puntaje = None
     mejor_dim = None
-    fortalecer = None
 
     if not df_prof.empty and "valor_central" in df_prof.columns:
         g_mask = df_prof["aspecto"].astype(str).str.lower() == "puntaje global"
@@ -820,10 +785,9 @@ def _render_curso_kpis(df_con_puntaje: pd.DataFrame, df_curso_full: pd.DataFrame
         ng_mask = ~(df_prof["aspecto"].astype(str).str.lower() == "puntaje global")
         dim_agg = df_prof[ng_mask].groupby("aspecto")["valor_central"].mean()
         if not dim_agg.empty:
-            mejor_dim  = _dim_short(dim_agg.idxmax())
-            fortalecer = _dim_short(dim_agg.idxmin())
+            mejor_dim = _dim_short(dim_agg.idxmax())
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5 = st.columns(5)
 
     def _k(col, label, val, foot="", highlight=False):
         color_v = _GOLD if highlight else _TEXT_P1
@@ -844,8 +808,7 @@ def _render_curso_kpis(df_con_puntaje: pd.DataFrame, df_curso_full: pd.DataFrame
     _k(c2, "Periodos con puntaje",     per_puntaje,    "calculado OK")
     _k(c3, "Promedio global del curso", prom_global,   "puntaje global",   highlight=True)
     _k(c4, "Último puntaje del curso",  ultimo_puntaje, "último periodo")
-    _k(c5, "Mejor dimensión",           mejor_dim,      "media más alta",   highlight=True)
-    _k(c6, "Dimensión a fortalecer",    fortalecer,     "media más baja")
+    _k(c5, "Aspecto más destacado",     mejor_dim,      "mayor media relativa", highlight=True)
 
 
 # ── Metodología ───────────────────────────────────────────────────────────────
@@ -860,12 +823,14 @@ def render_metodologia_section() -> None:
         ("01", "Separación de modelos",
          "Los modelos usan escalas distintas. Comparar puntajes directamente sería "
          "metodológicamente incorrecto; se presentan por separado."),
-        ("02", "Exclusión de registros",
-         "Los registros 'Sin docencia / No aplica' y 'NC / No calculado' "
-         "no se incluyen en promedios ni gráficas de desempeño."),
+        ("02", "Periodos excluidos automáticamente",
+         "Registros 'Sin docencia / No aplica' y 'NC / No calculado' "
+         "se excluyen de todos los promedios, gráficas y porcentajes. "
+         "Solo aparecen periodos con evaluación válida."),
         ("03", "Fuente oficial",
          "El archivo Excel cargado es la única fuente de datos. "
-         "Los datos de evaluación detallada son referencia auxiliar con indicador de confianza."),
+         "Los datos auxiliares de detalle son referencia complementaria "
+         "y no alimentan los KPIs principales."),
         ("04", "Deltas calculados",
          "Si la columna delta existe en el Excel, se usa directamente. "
          "Si está vacía pero hay puntaje y benchmark, se calcula automáticamente."),
