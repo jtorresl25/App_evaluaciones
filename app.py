@@ -30,6 +30,9 @@ from app.utils.data_cleaning import clean, build_subsets, clean_detalle
 from app.utils.metrics import compute
 from app.utils.pdf_analysis import compute_pdf_metrics as compute_detalle_metrics
 from app.components import sections
+from app.components.downloads import render_download_menu
+from app.components.recorder import Recorder
+from app.export.snapshot import DashboardSnapshot
 
 _DEFAULT_TEACHER = "el profesor"
 
@@ -185,6 +188,7 @@ else:
         df_filtered = df_filtered[df_filtered["periodo_label"].isin(filtro_periodos)]
 
     # Guardia: si los filtros vaciaron el df, mostrar aviso y usar datos completos
+    filtros_aplicados = True
     if df_filtered[df_filtered["es_valido_desempeno"]].empty and not df_clean[df_clean["es_valido_desempeno"]].empty:
         st.warning(
             "La combinación de filtros seleccionada no devuelve registros válidos. "
@@ -192,75 +196,106 @@ else:
             icon="⚠️",
         )
         df_filtered = df_clean.copy()
+        filtros_aplicados = False
 
     subsets_f = build_subsets(df_filtered)
     metrics_f = compute(subsets_f, df_filtered)
 
-    # ── Header de la página ───────────────────────────────────────────────────
-    st.markdown(
-        '<span style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;'
-        'color:#3AAFC4;font-weight:500;margin-top:1.5rem;display:block">'
-        'Dashboard de evaluaciones docentes</span>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f"<h1 style='font-family:Spectral,Georgia,serif;color:#E0EEF2;"
-        f"font-size:clamp(22px,3.5vw,40px);margin:4px 0 0;line-height:1.1'>"
-        f"Evaluaciones docentes — {nombre_docente}</h1>",
-        unsafe_allow_html=True,
-    )
     anio_min = anio_max = ""
     if "anio" in df_clean.columns:
         anos_num = pd.to_numeric(df_clean["anio"], errors="coerce").dropna().astype(int)
         if not anos_num.empty:
             anio_min, anio_max = int(anos_num.min()), int(anos_num.max())
     rango = f"{anio_min}–{anio_max}" if anio_min and anio_min != anio_max else str(anio_min)
-    st.markdown(
-        f"<p style='font-size:15px;color:#8CBECB;margin-bottom:1.2rem'>"
-        f"Análisis de desempeño y benchmarks institucionales · {rango}</p>",
-        unsafe_allow_html=True,
+
+    # ── Registro para descargas ───────────────────────────────────────────────
+    # Cada sección deja aquí su HTML y sus figuras; el PDF, la página HTML y los
+    # PNG se arman desde este registro al hacer clic en los botones de descarga.
+    filtros_desc = []
+    if filtros_aplicados:
+        if filtro_modelo and set(filtro_modelo) != set(modelos_disp):
+            filtros_desc.append(("Modelo de evaluación", ", ".join(filtro_modelo)))
+        if filtro_periodos:
+            filtros_desc.append(("Periodos", ", ".join(filtro_periodos)))
+    snapshot = DashboardSnapshot(
+        teacher=nombre_docente,
+        period_range=rango,
+        filters=[f"{k}: {v}" for k, v in filtros_desc],
     )
+    pagina = Recorder(snapshot)
+    incluye_detalle = df_detalle is not None and mostrar_detalle
+
+    # ── Header de la página ───────────────────────────────────────────────────
+    encabezado = pagina.section()
+    encabezado.html(
+        '<span style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;'
+        'color:#3AAFC4;font-weight:500;margin-top:1.5rem;display:block">'
+        'Dashboard de evaluaciones docentes</span>',
+        keep_with_next=True,
+    )
+    titulo_html = (
+        f"<h1 style='font-family:Spectral,Georgia,serif;color:#E0EEF2;"
+        f"font-size:clamp(22px,3.5vw,40px);margin:4px 0 0;line-height:1.1'>"
+        f"Evaluaciones docentes — {nombre_docente}</h1>"
+    )
+    fila_titulo = st.container(horizontal=True, vertical_alignment="bottom",
+                               horizontal_alignment="distribute", key="fila_titulo")
+    fila_titulo.markdown(titulo_html, unsafe_allow_html=True)
+    with fila_titulo:
+        render_download_menu(snapshot, incluye_detalle=incluye_detalle)
+    encabezado.record(titulo_html, keep_with_next=True)
+    encabezado.html(
+        f"<p style='font-size:15px;color:#8CBECB;margin-bottom:1.2rem'>"
+        f"Análisis de desempeño y benchmarks institucionales · {rango}</p>"
+    )
+    if snapshot.filters:
+        encabezado.record(sections.context_html([("Filtros aplicados", "; ".join(snapshot.filters))]))
 
     # ── Navegación por tabs ───────────────────────────────────────────────────
     tab_labels = ["📊 Resumen ejecutivo"]
-    if df_detalle is not None and mostrar_detalle:
+    if incluye_detalle:
         tab_labels.append("📋 Datos auxiliares")
 
     tabs = st.tabs(tab_labels)
 
     # ── Tab 1: Resumen ejecutivo ──────────────────────────────────────────────
     with tabs[0]:
-        sections.render_hero(metrics_f)
+        sections.render_hero(metrics_f, pagina.section())
 
-        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-        sections.render_kpis(metrics_f)
+        bloque = pagina.section()
+        bloque.divider()
+        sections.render_kpis(metrics_f, bloque)
 
-        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
+        bloque = pagina.section()
+        bloque.divider()
         df_actual_f = subsets_f.get("df_modelo_actual", pd.DataFrame())
-        sections.render_modelo_actual_section(df_actual_f, metrics_f)
+        sections.render_modelo_actual_section(df_actual_f, metrics_f, bloque)
 
         df_anterior_f = subsets_f.get("df_modelo_anterior", pd.DataFrame())
         if not df_anterior_f.empty:
-            st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-            sections.render_modelo_anterior_section(df_anterior_f, metrics_f)
+            bloque = pagina.section()
+            bloque.divider()
+            sections.render_modelo_anterior_section(df_anterior_f, metrics_f, bloque)
 
-        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-        sections.render_comparacion_relativa_section(metrics_f)
+        bloque = pagina.section()
+        bloque.divider()
+        sections.render_comparacion_relativa_section(metrics_f, bloque)
 
-        st.markdown('<div class="sec-divider"></div>', unsafe_allow_html=True)
-        sections.render_metodologia_section()
+        bloque = pagina.section()
+        bloque.divider()
+        sections.render_metodologia_section(bloque)
 
-        st.markdown(
+        bloque.html(
             '<div style="margin-top:3rem;padding:22px 0;border-top:1px solid #1A3D4E;'
             'font-size:12px;color:#537F8A;text-align:center;'
             'font-family:IBM Plex Sans,system-ui,sans-serif">'
             'Dashboard generado desde el archivo Excel cargado · '
             'Ningún dato es almacenado por la aplicación.'
-            '</div>',
-            unsafe_allow_html=True,
+            '</div>'
         )
 
     # ── Tab 2: Datos auxiliares (BASE_DETALLE) ────────────────────────────────
-    if df_detalle is not None and mostrar_detalle and len(tabs) > 1:
+    if incluye_detalle and len(tabs) > 1:
         with tabs[1]:
-            sections.render_detalle_section(df_detalle, detalle_metrics)
+            sections.render_detalle_section(df_detalle, detalle_metrics,
+                                            pagina.section(page_break=True))

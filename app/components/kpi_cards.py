@@ -1,4 +1,4 @@
-import streamlit as st
+from app.components.recorder import Recorder
 
 # ── Paleta oscura ─────────────────────────────────────────────────────────────
 _BG_CARD      = "#0D2733"
@@ -80,7 +80,21 @@ def render_kpi_card(
     ribbon: str | None = None,
     chip: str | None = None,
     suffix: str = "",
+    rec: Recorder | None = None,
 ) -> None:
+    rec = rec or Recorder()
+    rec.html(kpi_card_html(label, value, footer, highlight, ribbon, chip, suffix))
+
+
+def kpi_card_html(
+    label: str,
+    value,
+    footer: str | None = None,
+    highlight: bool = False,
+    ribbon: str | None = None,
+    chip: str | None = None,
+    suffix: str = "",
+) -> str:
     """
     Tarjeta KPI con estilos inline completos — tema oscuro.
     Funciona independientemente de si el CSS externo carga.
@@ -102,7 +116,7 @@ def render_kpi_card(
 
     display_value = (_fmt(value) + suffix) if value is not None else "—"
 
-    html = (
+    return (
         f'<div style="{card_style}">'
         f'{ribbon_html}'
         f'<span style="{lbl_style}">{label}</span>'
@@ -111,56 +125,51 @@ def render_kpi_card(
         f'{foot_html}'
         f'</div>'
     )
-    st.markdown(html, unsafe_allow_html=True)
 
 
 # ── Filas de KPIs ─────────────────────────────────────────────────────────────
-def render_kpi_row_hero(metrics: dict) -> None:
+def render_kpi_row_hero(metrics: dict, rec: Recorder | None = None) -> None:
+    rec = rec or Recorder()
     pct_fac  = metrics.get("pct_sobre_facultad_actual")
     pct_uni  = metrics.get("pct_sobre_universidad_actual")
     periodos = metrics.get("periodos_validos_modelo_actual", 0)
 
-    col1, col2, col3 = st.columns([2, 2, 1.5])
-    with col1:
-        render_kpi_card(
-            label="Posición sobre Facultad",
-            value=pct_fac, suffix="%",
-            footer="de periodos válidos por encima del promedio de Facultad",
-            highlight=True, ribbon="Modelo actual",
-        )
-    with col2:
-        render_kpi_card(
-            label="Posición sobre Universidad",
-            value=pct_uni, suffix="%",
-            footer="de periodos válidos por encima del promedio de Universidad",
-            highlight=True, ribbon="Modelo actual",
-        )
-    with col3:
-        render_kpi_card(
-            label="Periodos válidos · modelo actual",
-            value=periodos,
-            footer="registros con evaluación completa",
-            chip="serie continua",
-        )
+    col1, col2, col3 = rec.columns([2, 2, 1.5])
+    render_kpi_card(
+        label="Posición sobre Facultad",
+        value=pct_fac, suffix="%",
+        footer="de periodos válidos por encima del promedio de Facultad",
+        highlight=True, ribbon="Modelo actual", rec=col1,
+    )
+    render_kpi_card(
+        label="Posición sobre Universidad",
+        value=pct_uni, suffix="%",
+        footer="de periodos válidos por encima del promedio de Universidad",
+        highlight=True, ribbon="Modelo actual", rec=col2,
+    )
+    render_kpi_card(
+        label="Periodos válidos · modelo actual",
+        value=periodos,
+        footer="registros con evaluación completa",
+        chip="serie continua", rec=col3,
+    )
 
 
-def render_kpi_row_secondary(metrics: dict) -> None:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        render_kpi_card(
-            label="Cursos únicos",
-            value=metrics.get("cursos_unicos"),
-            footer="con datos individuales",
-        )
-    with col2:
-        render_kpi_card(
-            label="Registros válidos",
-            value=metrics.get("registros_validos"),
-            footer="en la base general",
-        )
-    with col3:
-        render_kpi_card(
-            label="Periodos válidos total",
-            value=metrics.get("total_periodos_validos"),
-            footer="ambos modelos combinados",
-        )
+def render_kpi_row_secondary(metrics: dict, rec: Recorder | None = None) -> None:
+    rec = rec or Recorder()
+    col1, col2, col3 = rec.columns(3)
+    render_kpi_card(
+        label="Cursos únicos",
+        value=metrics.get("cursos_unicos"),
+        footer="con datos individuales", rec=col1,
+    )
+    render_kpi_card(
+        label="Registros válidos",
+        value=metrics.get("registros_validos"),
+        footer="en la base general", rec=col2,
+    )
+    render_kpi_card(
+        label="Periodos válidos total",
+        value=metrics.get("total_periodos_validos"),
+        footer="ambos modelos combinados", rec=col3,
+    )

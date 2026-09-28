@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from app.utils import plots
 from app.components.kpi_cards import render_kpi_row_hero, render_kpi_row_secondary
+from app.components.recorder import Recorder
 
 # ── Paleta oscura ─────────────────────────────────────────────────────────────
 _BG_CARD      = "#0D2733"
@@ -24,24 +25,48 @@ _CHART_CONFIG = {"displayModeBar": False}
 
 
 # ── Helpers de estilo ─────────────────────────────────────────────────────────
-def _eyebrow(text: str) -> None:
-    st.markdown(
+def _eyebrow_html(text: str) -> str:
+    return (
         f'<span style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;'
         f'color:{_TEAL};font-weight:500;font-family:{_FONT};display:block;margin-bottom:4px">'
-        f'{text}</span>',
-        unsafe_allow_html=True,
+        f'{text}</span>'
     )
 
 
-def _graph_label(text: str) -> None:
-    st.markdown(
+def _graph_label_html(text: str) -> str:
+    return (
         f'<p style="font-size:13px;color:{_TEXT_P2};font-weight:500;'
-        f'font-family:{_FONT};margin-bottom:2px">{text}</p>',
-        unsafe_allow_html=True,
+        f'font-family:{_FONT};margin-bottom:2px">{text}</p>'
     )
 
 
-def _model_badge(text: str, active: bool = True) -> None:
+def _title_html(text: str, tag: str = "h3", margin: str = "4px 0 4px") -> str:
+    return (
+        f'<{tag} style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:{margin}">'
+        f'{text}</{tag}>'
+    )
+
+
+def _lead_html(text: str, margin_bottom: str = "12px") -> str:
+    return (
+        f'<p style="font-size:13.5px;color:{_TEXT_P2};font-family:{_FONT};'
+        f'margin-bottom:{margin_bottom}">{text}</p>'
+    )
+
+
+def context_html(items: list[tuple[str, str]]) -> str:
+    """Línea de contexto que solo aparece en las descargas (p. ej. el curso elegido)."""
+    partes = " · ".join(
+        f'<b style="color:{_TEXT_P1}">{k}:</b> {v}' for k, v in items if v
+    )
+    return (
+        f'<div style="background:{_BG_CARD};border:1px solid {_BORDER};border-radius:10px;'
+        f'padding:9px 14px;font-size:12.5px;color:{_TEXT_P2};font-family:{_FONT};'
+        f'line-height:1.5;margin-bottom:16px">{partes}</div>'
+    )
+
+
+def _model_badge_html(text: str, active: bool = True) -> str:
     if active:
         style = (
             f"display:inline-flex;align-items:center;gap:8px;"
@@ -55,23 +80,18 @@ def _model_badge(text: str, active: bool = True) -> None:
             f"background:{_BG_CARD_HI};color:{_TEXT_P2};"
             f"border:1px solid {_BORDER_STR};font-family:{_FONT};margin-bottom:6px;"
         )
-    st.markdown(f'<span style="{style}">{text}</span>', unsafe_allow_html=True)
+    return f'<span style="{style}">{text}</span>'
 
 
-def _divider() -> None:
-    st.markdown(
-        f'<div style="height:1px;background:{_BORDER};margin:1.4rem 0"></div>',
-        unsafe_allow_html=True,
-    )
+_DIVIDER_HTML = f'<div style="height:1px;background:{_BORDER};margin:1.4rem 0"></div>'
 
 
-def _interpret_box(html_text: str, color: str = _GREEN, tint: str = _GREEN_TINT,
-                   border: str = "rgba(77,184,138,0.25)") -> None:
-    st.markdown(
+def _interpret_box_html(html_text: str, color: str = _GREEN, tint: str = _GREEN_TINT,
+                        border: str = "rgba(77,184,138,0.25)") -> str:
+    return (
         f'<div style="background:{tint};border:1px solid {border};border-radius:12px;'
         f'padding:13px 18px;font-size:13.5px;color:{color};margin-top:6px;'
-        f'font-family:{_FONT};line-height:1.55">{html_text}</div>',
-        unsafe_allow_html=True,
+        f'font-family:{_FONT};line-height:1.55">{html_text}</div>'
     )
 
 
@@ -88,6 +108,14 @@ _DIM_SHORT: dict[str, str] = {
 
 def _dim_short(asp: str) -> str:
     return _DIM_SHORT.get(asp, asp[:22] + ("…" if len(asp) > 22 else ""))
+
+
+# Sílabas marcadas con guion suave (­): invisible, salvo que la palabra no
+# quepa en la tarjeta; entonces se corta por sílaba y con guion ("Responsabili-dades").
+_SILABAS: dict[str, str] = {
+    "Responsabilidades": "Res­pon­sa­bi­li­dades",
+    "Retroalimentación": "Re­tro­ali­men­tación",
+}
 
 
 def _check_periodo_consistency(df: pd.DataFrame) -> str | None:
@@ -111,7 +139,11 @@ def _check_periodo_consistency(df: pd.DataFrame) -> str | None:
 
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
-def render_hero(metrics: dict) -> None:
+def render_hero(metrics: dict, rec: Recorder | None = None) -> None:
+    (rec or Recorder()).html(hero_html(metrics))
+
+
+def hero_html(metrics: dict) -> str:
     pct_fac = metrics.get("pct_sobre_facultad_actual")
     pct_uni = metrics.get("pct_sobre_universidad_actual")
 
@@ -155,7 +187,7 @@ def render_hero(metrics: dict) -> None:
         sub_text = "Cargue el Excel para ver el análisis completo."
         headline = "Se analizaron los resultados frente a los benchmarks institucionales disponibles."
 
-    st.markdown(
+    return (
         f'<div style="'
         f'background:linear-gradient(135deg,#071520 0%,#0A2230 40%,#0E2E40 100%);'
         f'border:1px solid {_BORDER_STR};border-left:4px solid {_GOLD};'
@@ -178,8 +210,7 @@ def render_hero(metrics: dict) -> None:
         f'<h2 style="color:{_TEXT_P1};font-size:clamp(16px,2vw,22px);line-height:1.3;margin:10px 0 0;'
         f'font-family:{_FONT_SERIF};font-weight:600">{headline}</h2>'
         f'<p style="margin-top:10px;color:{_TEXT_P2};font-size:13.5px;font-family:{_FONT};line-height:1.55">{sub_text}</p>'
-        f'</div></div></div>',
-        unsafe_allow_html=True,
+        f'</div></div></div>'
     )
 
 
@@ -211,48 +242,43 @@ def render_upload_state() -> None:
 
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
-def render_kpis(metrics: dict) -> None:
-    _eyebrow("Resumen ejecutivo")
-    st.markdown(
-        f'<h3 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px">Indicadores principales</h3>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p style="font-size:13.5px;color:{_TEXT_P2};font-family:{_FONT};margin-bottom:14px">'
-        f'Las dos cifras del modelo actual concentran el mensaje; el resto da contexto sobre '
-        f'el volumen y solidez de los datos.</p>',
-        unsafe_allow_html=True,
-    )
-    render_kpi_row_hero(metrics)
-    st.write("")
-    render_kpi_row_secondary(metrics)
+def render_kpis(metrics: dict, rec: Recorder | None = None) -> None:
+    rec = rec or Recorder()
+    rec.html(_eyebrow_html("Resumen ejecutivo"), keep_with_next=True)
+    rec.html(_title_html("Indicadores principales"), keep_with_next=True)
+    rec.html(_lead_html(
+        "Las dos cifras del modelo actual concentran el mensaje; el resto da contexto sobre "
+        "el volumen y solidez de los datos.",
+        margin_bottom="14px",
+    ), keep_with_next=True)
+    render_kpi_row_hero(metrics, rec)
+    rec.spacer()
+    render_kpi_row_secondary(metrics, rec)
 
 
 # ── Modelo actual ─────────────────────────────────────────────────────────────
-def render_modelo_actual_section(df: pd.DataFrame, metrics: dict) -> None:
+def render_modelo_actual_section(df: pd.DataFrame, metrics: dict,
+                                 rec: Recorder | None = None) -> None:
+    rec = rec or Recorder()
     label = metrics.get("label_actual") or "Modelo actual"
-    _model_badge(f"● {label} · vigente", active=True)
-    st.markdown(
-        f'<h3 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px">'
-        f'Modelo actual: desempeño consistentemente superior al benchmark</h3>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p style="font-size:13.5px;color:{_TEXT_P2};font-family:{_FONT};margin-bottom:12px">'
-        f'Resultados por periodo · escala del modelo actual. '
-        f'Posición sostenida por encima de los promedios institucionales.</p>',
-        unsafe_allow_html=True,
-    )
+    seccion = f"Modelo actual · {label}"
+    rec.html(_model_badge_html(f"● {label} · vigente", active=True), keep_with_next=True)
+    rec.html(_title_html("Modelo actual: desempeño consistentemente superior al benchmark"),
+             keep_with_next=True)
+    rec.html(_lead_html(
+        "Resultados por periodo · escala del modelo actual. "
+        "Posición sostenida por encima de los promedios institucionales."
+    ), keep_with_next=True)
 
-    col_left, col_right = st.columns([1.3, 1])
-    with col_left:
-        _graph_label("Profesor vs. benchmarks institucionales")
-        st.plotly_chart(plots.plot_modelo_actual_line(df),
-                        use_container_width=True, config=_CHART_CONFIG)
-    with col_right:
-        _graph_label("Diferencia frente a benchmarks (delta por periodo)")
-        st.plotly_chart(plots.plot_modelo_actual_delta(df),
-                        use_container_width=True, config=_CHART_CONFIG)
+    col_left, col_right = rec.columns([1.3, 1])
+    titulo = "Profesor vs. benchmarks institucionales"
+    col_left.chart(plots.plot_modelo_actual_line(df), key="actual_linea", title=titulo,
+                   label_html=_graph_label_html(titulo), section=seccion,
+                   note="Resultados por periodo · escala del modelo actual")
+    titulo = "Diferencia frente a benchmarks (delta por periodo)"
+    col_right.chart(plots.plot_modelo_actual_delta(df), key="actual_delta", title=titulo,
+                    label_html=_graph_label_html(titulo), section=seccion,
+                    note="Puntaje del profesor menos el promedio institucional, en puntos")
 
     avg_fac = metrics.get("avg_delta_facultad_actual")
     avg_uni = metrics.get("avg_delta_universidad_actual")
@@ -264,78 +290,71 @@ def render_modelo_actual_section(df: pd.DataFrame, metrics: dict) -> None:
         if avg_uni is not None:
             s = f"+{avg_uni:.2f}" if avg_uni >= 0 else f"{avg_uni:.2f}"
             partes.append(f"<b style='color:{_TEXT_P1}'>{s} pts</b> vs Universidad")
-        _interpret_box(f"Diferencia promedio en el modelo actual: {' · '.join(partes)}")
+        rec.html(_interpret_box_html(
+            f"Diferencia promedio en el modelo actual: {' · '.join(partes)}"
+        ))
 
 
 # ── Contexto histórico ────────────────────────────────────────────────────────
-def render_modelo_anterior_section(df: pd.DataFrame, metrics: dict) -> None:
+def render_modelo_anterior_section(df: pd.DataFrame, metrics: dict,
+                                   rec: Recorder | None = None) -> None:
+    rec = rec or Recorder()
     label = metrics.get("label_anterior") or "Modelo anterior"
-    _model_badge(f"◎ {label} · contexto histórico", active=False)
-    st.markdown(
-        f'<h3 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px">'
-        f'Contexto histórico: trayectoria en el modelo anterior</h3>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p style="font-size:13.5px;color:{_TEXT_P2};font-family:{_FONT};margin-bottom:12px">'
-        f'Datos en escala original del modelo anterior. '
-        f'No se comparan directamente con el modelo actual.</p>',
-        unsafe_allow_html=True,
-    )
+    seccion = f"Contexto histórico · {label}"
+    rec.html(_model_badge_html(f"◎ {label} · contexto histórico", active=False),
+             keep_with_next=True)
+    rec.html(_title_html("Contexto histórico: trayectoria en el modelo anterior"),
+             keep_with_next=True)
+    rec.html(_lead_html(
+        "Datos en escala original del modelo anterior. "
+        "No se comparan directamente con el modelo actual."
+    ), keep_with_next=True)
 
-    col_left, col_right = st.columns([1.3, 1])
-    with col_left:
-        _graph_label("Profesor vs. benchmarks (modelo anterior)")
-        st.plotly_chart(plots.plot_modelo_anterior_line(df),
-                        use_container_width=True, config=_CHART_CONFIG)
-    with col_right:
-        _graph_label("Diferencia histórica frente a benchmarks")
-        st.plotly_chart(plots.plot_modelo_anterior_delta(df),
-                        use_container_width=True, config=_CHART_CONFIG)
+    col_left, col_right = rec.columns([1.3, 1])
+    titulo = "Profesor vs. benchmarks (modelo anterior)"
+    col_left.chart(plots.plot_modelo_anterior_line(df), key="anterior_linea", title=titulo,
+                   label_html=_graph_label_html(titulo), section=seccion,
+                   note="Escala original del modelo anterior")
+    titulo = "Diferencia histórica frente a benchmarks"
+    col_right.chart(plots.plot_modelo_anterior_delta(df), key="anterior_delta", title=titulo,
+                    label_html=_graph_label_html(titulo), section=seccion,
+                    note="Puntaje del profesor menos el promedio institucional, en puntos")
 
 
 # ── Comparación relativa ──────────────────────────────────────────────────────
-def render_comparacion_relativa_section(metrics: dict) -> None:
-    st.markdown(
-        f'<h3 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px">'
-        f'Comparación relativa: posición frente a benchmarks</h3>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<p style="font-size:13.5px;color:{_TEXT_P2};font-family:{_FONT};margin-bottom:12px">'
-        f'Porcentaje de periodos válidos en que el profesor superó cada benchmark. '
-        f'Ambos modelos en sus propias escalas.</p>',
-        unsafe_allow_html=True,
-    )
+def render_comparacion_relativa_section(metrics: dict, rec: Recorder | None = None) -> None:
+    rec = rec or Recorder()
+    titulo = "Comparación relativa: posición frente a benchmarks"
+    descripcion = ("Porcentaje de periodos válidos en que el profesor superó cada benchmark. "
+                   "Ambos modelos en sus propias escalas.")
+    rec.html(_title_html(titulo), keep_with_next=True)
+    rec.html(_lead_html(descripcion), keep_with_next=True)
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.plotly_chart(plots.plot_comparacion_relativa(metrics),
-                        use_container_width=True, config=_CHART_CONFIG)
-    with col2:
-        st.write("")
-        _metric_mini("% sobre Facultad (actual)",
-                     metrics.get("pct_sobre_facultad_actual"), "%")
-        _metric_mini("% sobre Universidad (actual)",
-                     metrics.get("pct_sobre_universidad_actual"), "%")
-        _divider()
-        _metric_mini("% sobre Facultad (anterior)",
-                     metrics.get("pct_sobre_facultad_anterior"), "%", muted=True)
-        _metric_mini("% sobre Universidad (anterior)",
-                     metrics.get("pct_sobre_universidad_anterior"), "%", muted=True)
+    col1, col2 = rec.columns([2, 1])
+    col1.chart(plots.plot_comparacion_relativa(metrics), key="comparacion_relativa",
+               title=titulo, section="Comparación relativa", note=descripcion)
+    col2.spacer()
+    col2.html(_metric_mini_html("% sobre Facultad (actual)",
+                                metrics.get("pct_sobre_facultad_actual"), "%"))
+    col2.html(_metric_mini_html("% sobre Universidad (actual)",
+                                metrics.get("pct_sobre_universidad_actual"), "%"))
+    col2.html(_DIVIDER_HTML)
+    col2.html(_metric_mini_html("% sobre Facultad (anterior)",
+                                metrics.get("pct_sobre_facultad_anterior"), "%", muted=True))
+    col2.html(_metric_mini_html("% sobre Universidad (anterior)",
+                                metrics.get("pct_sobre_universidad_anterior"), "%", muted=True))
 
 
-def _metric_mini(label: str, value, suffix: str = "", muted: bool = False) -> None:
+def _metric_mini_html(label: str, value, suffix: str = "", muted: bool = False) -> str:
     color = _TEXT_MUTED if muted else _TEXT_P1
     font_size = "22px" if muted else "28px"
     val_str = f"{value:.0f}{suffix}" if value is not None else "—"
-    st.markdown(
+    return (
         f'<div style="margin-bottom:12px;font-family:{_FONT}">'
         f'<div style="font-size:11.5px;color:{_TEXT_MUTED}">{label}</div>'
         f'<div style="font-size:{font_size};font-family:{_FONT_SERIF};'
         f'font-weight:700;color:{color};line-height:1.15">{val_str}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
+        f'</div>'
     )
 
 
@@ -420,32 +439,32 @@ def _render_cursos_tab(df: pd.DataFrame, escala_label: str) -> None:
 
 
 # ── Detalle por curso y aspecto (BASE_DETALLE) ────────────────────────────────
-def _render_page_kpis(detalle_metrics: dict, rubros_evaluados: int) -> None:
+def _render_page_kpis(detalle_metrics: dict, rubros_evaluados: int, rec: Recorder) -> None:
     """KPI cards de página para la sección Detalle por curso."""
-    _eyebrow("Resumen de datos auxiliares")
+    rec.html(_eyebrow_html("Resumen de datos auxiliares"), keep_with_next=True)
     kpis = [
         ("Cursos únicos",        detalle_metrics.get("cursos_unicos_pdf", 0),  "en la base"),
         ("Cursos con puntaje",   detalle_metrics.get("cursos_con_puntaje", 0), "calculado OK"),
         ("Aspectos evaluados",   rubros_evaluados,                             "dimensiones"),
         ("Periodos con detalle", detalle_metrics.get("periodos_pdf", 0),       "semestres"),
     ]
-    cols = st.columns(len(kpis))
+    cols = rec.columns(len(kpis))
     for col, (label, val, foot) in zip(cols, kpis):
-        col.markdown(
+        col.html(
             f'<div style="background:{_BG_CARD};border:1px solid {_BORDER};'
             f'border-radius:14px;padding:14px 14px 10px;font-family:{_FONT}">'
             f'<div style="font-size:11px;color:{_TEXT_P2};margin-bottom:4px">{label}</div>'
             f'<div style="font-size:28px;font-family:{_FONT_SERIF};font-weight:700;'
             f'color:{_TEXT_P1};line-height:1.1">{"—" if val is None else str(val)}</div>'
             f'<div style="font-size:10.5px;color:{_TEXT_MUTED};margin-top:4px">{foot}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
+            f'</div>'
         )
 
     # Los registros NC/sin cálculo se excluyen internamente — no se muestra alerta visible.
 
 
-def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> None:
+def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict,
+                           rec: Recorder | None = None) -> None:
     """
     Sección Detalle por curso y aspecto (BASE_DETALLE).
     Análisis a nivel de curso individual: evolución, dimensiones, heatmap.
@@ -461,29 +480,33 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
         _sorted_periodos,
     )
 
+    rec = rec or Recorder()
+
     # Alias interno para mantener legibilidad del código existente
     df_pdf = df_detalle
     pdf_metrics = detalle_metrics
 
     # ── Encabezado ────────────────────────────────────────────────────────────
-    _eyebrow("Detalle por curso y aspecto")
-    st.markdown(
+    rec.html(_eyebrow_html("Detalle por curso y aspecto"), keep_with_next=True)
+    rec.html(
         f'<h2 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px;'
         f'font-size:clamp(20px,2.5vw,30px)">'
         f'Detalle por curso y aspecto</h2>',
-        unsafe_allow_html=True,
+        keep_with_next=True,
     )
-    st.markdown(
+    rec.html(
         f'<p style="font-size:14px;color:{_TEXT_P2};font-family:{_FONT};'
         f'margin-bottom:16px;line-height:1.55">'
         f'Información auxiliar proveniente de reportes, extracción manual o consolidaciones '
         f'por curso/aspecto. Estos datos no alimentan los KPIs principales salvo que se '
         f'integren explícitamente en BASE_GENERAL_DOCENTE.</p>',
-        unsafe_allow_html=True,
+        keep_with_next=True,
     )
 
     if df_pdf is None or df_pdf.empty:
-        st.info("No hay datos de evaluación detallada disponibles en este archivo.")
+        mensaje = "No hay datos de evaluación detallada disponibles en este archivo."
+        st.info(mensaje)
+        rec.record(context_html([("Nota", mensaje)]))
         return
 
     # ── KPIs de página ────────────────────────────────────────────────────────
@@ -495,20 +518,19 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
             ]["aspecto"].dropna().nunique()
         )
 
-    _render_page_kpis(pdf_metrics, rubros_evaluados)
+    _render_page_kpis(pdf_metrics, rubros_evaluados, rec)
 
     # Validación discreta de consistencia de periodos (no bloquea la app)
     _alert = _check_periodo_consistency(df_pdf)
     if _alert:
-        st.markdown(
+        rec.html(
             f'<div style="margin-top:8px;padding:7px 13px;border-radius:7px;'
             f'background:rgba(227,109,90,0.09);border:1px solid rgba(227,109,90,0.25);'
             f'font-size:12px;color:#E36D5A;font-family:{_FONT}">'
-            f'⚠ {_alert}</div>',
-            unsafe_allow_html=True,
+            f'⚠ {_alert}</div>'
         )
 
-    _divider()
+    rec.html(_DIVIDER_HTML)
 
     # ── Preparar lista de cursos ──────────────────────────────────────────────
     nombre_col = (
@@ -533,7 +555,9 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
             map_opcion_codigo[key] = row["curso_codigo_base"]
 
     if not opciones_cursos:
-        st.warning("No se encontraron cursos individuales en los datos.")
+        mensaje = "No se encontraron cursos individuales en los datos."
+        st.warning(mensaje)
+        rec.record(context_html([("Nota", mensaje)]))
         return
 
     # Default: curso con más periodos con puntaje calculado
@@ -581,6 +605,13 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
             key="dd_nivel",
         )
 
+    # En las descargas, la selección reemplaza a los selectores
+    rec.record(context_html([
+        ("Curso", sel_op), ("Periodo", f_periodo), ("Nivel de comparación", f_nivel_str),
+    ]))
+    seccion = f"Datos auxiliares · {sel_op}"
+    contexto = f"Periodo: {f_periodo} · Nivel de comparación: {f_nivel_str}"
+
     # ── Filtrar datos del curso ───────────────────────────────────────────────
     df_curso = df_pdf[df_pdf["curso_codigo_base"] == sel_cod].copy()
     if f_periodo != "Todos" and "periodo_label" in df_curso.columns:
@@ -607,7 +638,7 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
             ", ".join(df_curso["periodo_label"].dropna().unique().tolist())
             if "periodo_label" in df_curso.columns else "—"
         )
-        st.markdown(
+        rec.html(
             f'<div style="background:{_BG_CARD};border:1px solid {_BORDER_STR};'
             f'border-radius:14px;padding:20px 24px;margin-top:12px;font-family:{_FONT}">'
             f'<div style="font-size:14px;color:{_TEXT_P1};font-weight:600;margin-bottom:8px">'
@@ -615,8 +646,7 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
             f'<div style="font-size:13px;color:{_TEXT_P2};line-height:1.7">'
             f'<b style="color:{_TEXT_P1}">Periodos:</b> {periodos_nc}<br>'
             f'{"<b style=\'color:" + _TEXT_P1 + "\'>Motivo:</b> " + motivo if motivo else "Motivo no disponible."}'
-            f'</div></div>',
-            unsafe_allow_html=True,
+            f'</div></div>'
         )
         return
 
@@ -628,6 +658,7 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
     )
 
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
+    # En las descargas no hay pestañas: su contenido va en orden, en bloques.
     tab_res, tab_tend, tab_mapa, tab_datos = st.tabs([
         "📊 Resumen auxiliar",
         "📈 Tendencia por aspecto",
@@ -637,11 +668,11 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
 
     # ── Resumen del curso ─────────────────────────────────────────────────────
     with tab_res:
-        _render_curso_kpis(df_con_puntaje, df_curso)
-        _divider()
+        _render_curso_kpis(df_con_puntaje, df_curso, rec)
 
         # Gráfico principal: evolución puntaje global (todos los niveles curso)
-        _graph_label("Evolución del curso seleccionado")
+        bloque = rec.section()
+        bloque.divider(_DIVIDER_HTML)
         df_evol = df_pdf[
             (df_pdf["curso_codigo_base"] == sel_cod)
             & (df_pdf["aspecto"].astype(str).str.strip().str.lower() == "puntaje global")
@@ -652,33 +683,29 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
         if f_periodo != "Todos" and "periodo_label" in df_evol.columns:
             df_evol = df_evol[df_evol["periodo_label"] == f_periodo]
 
-        st.plotly_chart(
-            plot_evolucion_curso(df_evol),
-            use_container_width=True, config=_CHART_CONFIG,
-        )
-
-        _divider()
+        titulo = "Evolución del curso seleccionado"
+        bloque.chart(plot_evolucion_curso(df_evol), key="detalle_evolucion", title=titulo,
+                     label_html=_graph_label_html(titulo), section=seccion,
+                     note=f"Puntaje global por periodo · {contexto}")
 
         # Gráfico de dimensiones (excluye Puntaje global) — siempre barras
-        _graph_label("Perfil por aspectos del curso")
+        bloque = rec.section()
+        bloque.divider(_DIVIDER_HTML)
         df_dims = (
             df_plot[
                 df_plot["aspecto"].astype(str).str.strip().str.lower() != "puntaje global"
             ].copy()
             if "aspecto" in df_plot.columns else df_plot.copy()
         )
-        st.plotly_chart(
-            plot_dimensiones_barras(df_dims, niveles_activos),
-            use_container_width=True, config=_CHART_CONFIG,
-        )
+        titulo = "Perfil por aspectos del curso"
+        bloque.chart(plot_dimensiones_barras(df_dims, niveles_activos), key="detalle_perfil",
+                     title=titulo, label_html=_graph_label_html(titulo), section=seccion,
+                     note=f"Puntaje promedio por aspecto · {contexto}")
 
     # ── Tendencia por rubro ───────────────────────────────────────────────────
     with tab_tend:
-        st.markdown(
-            f'<h4 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 10px">'
-            f'Tendencia por rubro</h4>',
-            unsafe_allow_html=True,
-        )
+        bloque = rec.section()
+        bloque.html(_title_html("Tendencia por rubro", "h4", "4px 0 10px"), keep_with_next=True)
         if "aspecto" in df_con_puntaje.columns:
             asp_disp = _ordered_aspects(
                 df_con_puntaje["aspecto"].dropna().unique().tolist()
@@ -700,38 +727,37 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
             key="dd_asp",
         )
         nivel_tend = f_nivel_str if f_nivel_str != "Todos" else "Profesor curso"
-        st.plotly_chart(
-            plot_tendencia_curso(df_con_puntaje, sel_asp, nivel_tend),
-            use_container_width=True, config=_CHART_CONFIG,
-        )
+        dimensiones = ", ".join(_dim_short(a) for a in sel_asp) or "—"
+        bloque.record(context_html([("Dimensiones", dimensiones), ("Nivel", nivel_tend)]),
+                      keep_with_next=True)
+        bloque.chart(plot_tendencia_curso(df_con_puntaje, sel_asp, nivel_tend),
+                     key="detalle_tendencia", title="Tendencia por rubro", section=seccion,
+                     note=f"Dimensiones: {dimensiones} · Nivel: {nivel_tend}")
 
     # ── Mapa de desempeño ─────────────────────────────────────────────────────
     with tab_mapa:
-        st.markdown(
-            f'<h4 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 4px">'
-            f'Mapa auxiliar de desempeño por curso y aspecto</h4>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
+        bloque = rec.section()
+        titulo = "Mapa auxiliar de desempeño por curso y aspecto"
+        bloque.html(_title_html(titulo, "h4", "4px 0 4px"), keep_with_next=True)
+        bloque.html(
             f'<p style="font-size:13px;color:{_TEXT_P2};font-family:{_FONT};'
             f'margin-bottom:4px;line-height:1.5">'
             f'Promedio de puntajes registrados en BASE_DETALLE por curso y aspecto. '
             f'La intensidad del color muestra diferencias relativas entre fortalezas; '
             f'los valores faltantes indican ausencia de dato.</p>',
-            unsafe_allow_html=True,
+            keep_with_next=True,
         )
-        st.markdown(
+        bloque.html(
             f'<div style="margin-bottom:10px;padding:6px 12px;border-radius:7px;'
             f'background:rgba(90,215,232,0.07);border:1px solid rgba(90,215,232,0.18);'
             f'font-size:11.5px;color:{_TEXT_P2};font-family:{_FONT}">'
             f'Los KPIs principales se calculan únicamente desde BASE_GENERAL_DOCENTE. '
             f'Esta vista resume datos auxiliares de BASE_DETALLE.</div>',
-            unsafe_allow_html=True,
+            keep_with_next=True,
         )
-        st.plotly_chart(
-            plot_heatmap_cursos(df_pdf),
-            use_container_width=True, config=_CHART_CONFIG,
-        )
+        bloque.chart(plot_heatmap_cursos(df_pdf), key="detalle_mapa", title=titulo,
+                     section="Datos auxiliares",
+                     note="Promedio de puntajes del profesor por curso y aspecto (BASE_DETALLE)")
 
     # ── Datos ─────────────────────────────────────────────────────────────────
     with tab_datos:
@@ -749,7 +775,8 @@ def render_detalle_section(df_detalle: pd.DataFrame, detalle_metrics: dict) -> N
             st.caption(f"{len(df_plot)} filas mostradas.")
 
 
-def _render_curso_kpis(df_con_puntaje: pd.DataFrame, df_curso_full: pd.DataFrame) -> None:
+def _render_curso_kpis(df_con_puntaje: pd.DataFrame, df_curso_full: pd.DataFrame,
+                       rec: Recorder) -> None:
     """KPI cards para el curso seleccionado."""
     per_total = (
         df_curso_full["periodo_label"].nunique()
@@ -787,21 +814,32 @@ def _render_curso_kpis(df_con_puntaje: pd.DataFrame, df_curso_full: pd.DataFrame
         if not dim_agg.empty:
             mejor_dim = _dim_short(dim_agg.idxmax())
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5 = rec.columns(5)
 
     def _k(col, label, val, foot="", highlight=False):
         color_v = _GOLD if highlight else _TEXT_P1
         bg = (f"background:{_BG_CARD_HI};border:1px solid {_BORDER_STR};"
               if highlight else f"background:{_BG_CARD};border:1px solid {_BORDER};")
-        col.markdown(
+        tamano = "font-size:24px;line-height:1.1"
+        texto = "—" if val is None else str(val)
+        if isinstance(val, str):
+            # Textos largos ("Responsabilidades"): el tamaño baja con el ancho de la
+            # tarjeta (unidades cqi) para caber en una línea, sin bajar de 16 px; si
+            # aun así no cabe, se corta por sílaba (_SILABAS) y no a la mitad.
+            # 0.55 ≈ ancho medio de un carácter de Spectral 700, en em.
+            # min-height = alto de las cifras, para que las tarjetas queden alineadas.
+            ajuste = 100 / (0.55 * max(len(val), 1))
+            tamano = (f"font-size:24px;font-size:clamp(16px,{ajuste:.1f}cqi,24px);"
+                      f"line-height:1.1;min-height:26.4px;display:flex;align-items:center")
+            texto = _SILABAS.get(val, val)
+        col.html(
             f'<div style="{bg}border-radius:14px;padding:16px 14px 12px;'
-            f'font-family:{_FONT};height:100%">'
+            f'font-family:{_FONT};height:100%;container-type:inline-size">'
             f'<div style="font-size:11px;color:{_TEXT_P2};margin-bottom:5px">{label}</div>'
-            f'<div style="font-size:24px;font-family:{_FONT_SERIF};font-weight:700;'
-            f'color:{color_v};line-height:1.1">{"—" if val is None else str(val)}</div>'
+            f'<div style="{tamano};font-family:{_FONT_SERIF};font-weight:700;'
+            f'color:{color_v}">{texto}</div>'
             f'<div style="font-size:10.5px;color:{_TEXT_MUTED};margin-top:5px">{foot}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
+            f'</div>'
         )
 
     _k(c1, "Periodos dictados",        per_total,      "en la base")
@@ -812,12 +850,9 @@ def _render_curso_kpis(df_con_puntaje: pd.DataFrame, df_curso_full: pd.DataFrame
 
 
 # ── Metodología ───────────────────────────────────────────────────────────────
-def render_metodologia_section() -> None:
-    st.markdown(
-        f'<h3 style="font-family:{_FONT_SERIF};color:{_TEXT_P1};margin:4px 0 12px">'
-        f'Nota metodológica</h3>',
-        unsafe_allow_html=True,
-    )
+def render_metodologia_section(rec: Recorder | None = None) -> None:
+    rec = rec or Recorder()
+    rec.html(_title_html("Nota metodológica", margin="4px 0 12px"), keep_with_next=True)
 
     items = [
         ("01", "Separación de modelos",
@@ -836,18 +871,16 @@ def render_metodologia_section() -> None:
          "Si está vacía pero hay puntaje y benchmark, se calcula automáticamente."),
     ]
 
-    cols = st.columns(4)
+    cols = rec.columns(4)
     for col, (num, titulo, texto) in zip(cols, items):
-        with col:
-            st.markdown(
-                f'<div style="background:{_BG_CARD};border:1px solid {_BORDER};'
-                f'border-radius:16px;padding:20px 18px;'
-                f'box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:{_FONT}">'
-                f'<div style="font-family:{_FONT_SERIF};font-size:22px;'
-                f'font-weight:600;color:{_BORDER_STR};line-height:1">{num}</div>'
-                f'<div style="font-size:14px;font-weight:600;color:{_TEXT_P1};'
-                f'margin:9px 0 6px">{titulo}</div>'
-                f'<div style="font-size:12.5px;color:{_TEXT_P2};line-height:1.5">{texto}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        col.html(
+            f'<div style="background:{_BG_CARD};border:1px solid {_BORDER};'
+            f'border-radius:16px;padding:20px 18px;'
+            f'box-shadow:0 2px 8px rgba(0,0,0,0.2);font-family:{_FONT}">'
+            f'<div style="font-family:{_FONT_SERIF};font-size:22px;'
+            f'font-weight:600;color:{_BORDER_STR};line-height:1">{num}</div>'
+            f'<div style="font-size:14px;font-weight:600;color:{_TEXT_P1};'
+            f'margin:9px 0 6px">{titulo}</div>'
+            f'<div style="font-size:12.5px;color:{_TEXT_P2};line-height:1.5">{texto}</div>'
+            f'</div>'
+        )

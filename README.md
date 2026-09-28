@@ -34,6 +34,36 @@ La app se abre en `http://localhost:8501`.
 3. La app calcula todo desde el archivo cargado.
 4. Usa el checkbox "Mostrar datos auxiliares" para ver la sección de detalle.
 5. "Filtros avanzados" permite segmentar por modelo o periodo si es necesario.
+6. Usa el botón **Descargar** (junto al título) o el botón **PNG** de cada gráfico para llevarte el análisis.
+
+## Descargas
+
+Todo se descarga con el mismo diseño del dashboard y refleja exactamente lo que se ve en pantalla: nombre del docente, filtros aplicados y curso seleccionado en los datos auxiliares.
+
+| Opción | Dónde | Qué obtienes |
+|---|---|---|
+| Reporte completo (PDF) | Menú **Descargar** | Todas las secciones en hojas tamaño carta, sin gráficos ni tarjetas cortados, con fecha y número de página. Si "Mostrar datos auxiliares" está activo, incluye el detalle del curso seleccionado. |
+| Página interactiva (HTML) | Menú **Descargar** | El mismo reporte en un archivo que se abre en cualquier navegador, incluso sin internet, con el detalle al pasar el mouse y un botón **Guardar como PDF**. |
+| Un gráfico (PNG) | Botón **PNG** sobre cada gráfico | Imagen de 2640 px de ancho con título, contexto y pie; lista para Word o PowerPoint. |
+| Todos los gráficos (ZIP) | Menú **Descargar** | Los PNG de todos los gráficos, numerados en el orden del dashboard. |
+
+### Requisito: Chrome, Edge o Chromium
+
+El PDF y los PNG se generan con un navegador Chromium sin interfaz, a través de la librería `choreographer`:
+
+- **Windows / macOS (uso local):** basta con tener Google Chrome o Microsoft Edge instalado.
+- **Streamlit Community Cloud:** el archivo `packages.txt` instala `chromium`.
+- **Otra ruta:** define la variable de entorno `BROWSER_PATH` con la ruta del ejecutable.
+
+Si no hay navegador disponible, la app sigue funcionando: el menú ofrece la página HTML (desde la cual se guarda el PDF con el navegador) y cada gráfico muestra el ícono de cámara de Plotly para bajarlo en PNG.
+
+### Cómo está construido (mantenimiento)
+
+- Las secciones dibujan con `Recorder` (`app/components/recorder.py`): `rec.html(...)`, `rec.columns(...)` y `rec.chart(...)` hacen lo mismo que `st.markdown`, `st.columns` y `st.plotly_chart`, y además registran lo dibujado en un `DashboardSnapshot`. Para que una sección nueva aparezca en las descargas, ábrela con `rec.section()` y dibuja sus gráficos con `rec.chart(fig, key=..., title=...)`.
+- `app/export/report.py` arma el reporte con los mismos fragmentos HTML del dashboard y un CSS equivalente al de Streamlit; un script reparte los bloques en hojas y, si un gráfico es más alto que una hoja, lo reduce junto a su título en vez de cortarlo.
+- `app/export/plotly_theme.py` fija el tema de Plotly ya resuelto: Streamlit usa colores marcadores que solo su navegador traduce. **Si cambias el tema en `.streamlit/config.toml`, actualiza este archivo.**
+- `app/export/fonts/` contiene Spectral, IBM Plex Sans y Source Sans 3 (licencia SIL OFL) para que el reporte se vea igual sin conexión.
+- Pruebas: `pip install pytest` y luego `python -m pytest tests` (usan datos sintéticos).
 
 ## Estructura esperada del Excel
 
@@ -67,6 +97,7 @@ Si el archivo tiene la hoja antigua **`BASE_DETALLE_PDF`**, la app la usa como f
 
 - La app **no almacena datos**. Todo el procesamiento ocurre en la sesión local.
 - El archivo Excel no sale del equipo ni se transmite a ningún servidor externo.
+- Las descargas se generan en el equipo o servidor donde corre la app; los archivos temporales que usa el navegador para dibujarlas se borran de inmediato.
 - Antes de cargar el archivo, la app no muestra ningún dato personal ni resultado real.
 - No se deben subir archivos Excel reales al repositorio.
 
@@ -80,7 +111,7 @@ Si el archivo tiene la hoja antigua **`BASE_DETALLE_PDF`**, la app la usa como f
 4. Configura:
    - **Main file path:** `app.py`
    - **Python version:** 3.10 o superior
-5. Despliega — la app leerá `requirements.txt` automáticamente.
+5. Despliega — la app leerá `requirements.txt` y `packages.txt` (Chromium para PDF y PNG) automáticamente.
 
 No se necesitan secrets ni variables de entorno para el funcionamiento básico.
 
@@ -104,6 +135,7 @@ No se necesitan secrets ni variables de entorno para el funcionamiento básico.
 ```
 app.py                    # Punto de entrada Streamlit
 requirements.txt
+packages.txt              # Chromium para Streamlit Cloud (PDF y PNG)
 README.md
 .gitignore
 .streamlit/
@@ -112,6 +144,14 @@ app/
   components/
     kpi_cards.py          # Tarjetas KPI
     sections.py           # Secciones del dashboard
+    recorder.py           # Dibuja en Streamlit y registra para las descargas
+    downloads.py          # Menú "Descargar"
+  export/
+    snapshot.py           # Registro de lo que muestra el dashboard
+    report.py             # Reporte paginado (PDF/HTML) y tarjetas de gráficos (PNG)
+    browser.py            # Render con Chrome/Edge/Chromium sin interfaz
+    plotly_theme.py       # Tema Plotly igual al de pantalla
+    fonts/                # Fuentes incrustadas (licencia OFL)
   utils/
     data_loader.py        # Lectura y validación del Excel
     data_cleaning.py      # Limpieza, parseo de periodos, subconjuntos
@@ -122,4 +162,6 @@ app/
     main.css              # Estilos tema oscuro
 data/
   sample/                 # (opcional) datos ficticios anonimizados
+tests/
+  test_export.py          # Pruebas de las descargas (datos sintéticos)
 ```

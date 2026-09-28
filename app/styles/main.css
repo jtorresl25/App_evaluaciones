@@ -73,3 +73,37 @@ div[data-testid="stAlert"] {
 
 /* ---------- Spinner ---------- */
 .stSpinner > div { border-top-color: #3AAFC4 !important; }
+
+/* ---------- Descarga PNG de cada gráfico ---------- */
+/* Botón discreto junto a la etiqueta del gráfico; se ilumina al pasar el mouse.
+   La fila ocupa el mismo alto que la etiqueta sola, para no mover el gráfico. */
+div[class*="st-key-chartbox_"] {
+  position: relative;
+}
+div[class*="st-key-charthead_"] {
+  margin-bottom: -16px;
+}
+/* Gráficos sin etiqueta: el botón flota en la esquina superior derecha.
+   Se saca del flujo el envoltorio de Streamlit para no sumar espacio sobre el gráfico. */
+div[data-testid="stLayoutWrapper"]:has(> div[class*="st-key-charttools_"]) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: auto !important;
+  z-index: 2;
+}
+div[class*="st-key-dlpng_"] button {
+  min-height: 0 !important;
+  height: 23px;
+  padding: 0 6px !important;
+  color: #537F8A !important;
+  opacity: .75;
+  transition: opacity .15s ease, color .15s ease;
+}
+div[class*="st-key-dlpng_"] button p {
+  font-size: 12px !important;
+}
+div[class*="st-key-chartbox_"]:hover div[class*="st-key-dlpng_"] button {
+  opacity: 1;
+  color: #3AAFC4 !important;
+}
